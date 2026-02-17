@@ -17,9 +17,9 @@ Server 是 CodePod 的控制平面核心组件，提供 RESTful API 供 CLI 和 
 
 - **运行时**：Node.js 20 LTS
 - **框架**：Express.js / Fastify
-- **数据库**：PostgreSQL（主数据存储）
-- **缓存**：Redis（会话、速率限制）
-- **消息队列**：RabbitMQ / NATS（异步任务）
+- **数据库**：SQLite（默认）/ PostgreSQL（可选）
+- **缓存**：Redis（可选，会话、速率限制）
+- **消息队列**：内存队列（默认）/ RabbitMQ / NATS（可选，异步任务）
 - **gRPC 客户端**：@grpc/grpc-js（与 Runner 通信）
 
 ---
@@ -124,7 +124,7 @@ apps/server/
          │              │              │
          ▼              ▼              ▼
     ┌──────────────────────────────────────────────────────────┐
-    │                      PostgreSQL                            │
+    │                      SQLite / PostgreSQL                    │
     └──────────────────────────────────────────────────────────┘
                           │
                           ▼
@@ -1379,7 +1379,26 @@ class Worker {
 
 ## 8. 数据库模型
 
-### 8.1 Prisma Schema
+### 8.1 数据库选择
+
+Server 支持 **SQLite**（默认）和 **PostgreSQL** 两种数据库。
+
+```bash
+# 默认使用 SQLite
+DATABASE_URL="file:./data/codepod.db"
+
+# 切换到 PostgreSQL
+DATABASE_URL="postgresql://user:pass@localhost:5432/codepod"
+```
+
+| 特性 | SQLite | PostgreSQL |
+|------|--------|------------|
+| 部署复杂度 | 低（单文件） | 高（需单独服务） |
+| 并发性能 | 中等 | 高 |
+| 适用场景 | 开发/单机部署 | 生产/分布式部署 |
+| 备份 | 复制文件即可 | pg_dump |
+
+### 8.2 Prisma Schema
 
 ```prisma
 // prisma/schema.prisma
@@ -1389,7 +1408,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"  // 默认使用 SQLite，改为 postgresql 即切换到 PostgreSQL
   url      = env("DATABASE_URL")
 }
 
@@ -1399,8 +1418,8 @@ model ApiKey {
   keyHash     String    @unique
   name        String
   userId      String
-  permissions String[]
-  status      ApiKeyStatus @default(active)
+  permissions String    @default("[]")  // SQLite 用 JSON 字符串存储
+  status      String    @default("active")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   lastUsedAt  DateTime?
@@ -1409,30 +1428,25 @@ model ApiKey {
   @@index([userId])
 }
 
-enum ApiKeyStatus {
-  active
-  revoked
-}
-
 // Sandbox 实例
 model Sandbox {
-  id            String         @id @default(uuid())
+  id            String    @id @default(uuid())
   name          String
   userId        String
   apiKeyId      String
   runnerId      String?
   image         String
-  imageVersion  String         @default("latest")
-  status        SandboxStatus  @default(pending)
-  resources     Json
-  env           Json?
+  imageVersion  String    @default("latest")
+  status        String    @default("pending")
+  resources     String    @default("{}")  // JSON 字符串
+  env           String?   // JSON 字符串
   sshToken      String?
-  timeout       Int            @default(3600)
-  annotations   Json?
-  exposedPorts  Int[]
-  metrics       Json?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  timeout       Int       @default(3600)
+  annotations   String?   // JSON 字符串
+  exposedPorts  String    @default("[]") // JSON 字符串
+  metrics       String?   // JSON 字符串
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
   startedAt     DateTime?
   stoppedAt     DateTime?
   archivedAt    DateTime?
@@ -1442,37 +1456,21 @@ model Sandbox {
   @@index([status])
 }
 
-enum SandboxStatus {
-  pending
-  running
-  failed
-  stopped
-  deleting
-  archived
-}
-
 // Runner 注册表
 model Runner {
-  id          String       @id @default(uuid())
+  id          String    @id @default(uuid())
   name        String
-  address     String
-  status      RunnerStatus @default(offline)
-  capacity    Json
-  resources   Json
+  address     String    @unique
+  status      String    @default("offline")
+  capacity    String    @default("{}")  // JSON 字符串
+  resources   String    @default("{}")  // JSON 字符串
   region      String?
-  metadata    Json?
-  lastHeartbeat DateTime   @default(now())
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  metadata    String?   // JSON 字符串
+  lastHeartbeat DateTime @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  @@unique([address])
   @@index([status])
-}
-
-enum RunnerStatus {
-  online
-  offline
-  maintenance
 }
 
 // 用户配额
@@ -1488,22 +1486,17 @@ model Quota {
 
 // Webhook 配置
 model Webhook {
-  id          String          @id @default(uuid())
+  id          String    @id @default(uuid())
   name        String
   url         String
   secret      String?
-  events     String[]
-  status      WebhookStatus   @default(active)
+  events      String    @default("[]")  // JSON 字符串
+  status      String    @default("active")
   sandboxId   String?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([sandboxId])
-}
-
-enum WebhookStatus {
-  active
-  inactive
 }
 
 // Webhook 发送记录
@@ -1511,7 +1504,7 @@ model WebhookLog {
   id          String   @id @default(uuid())
   webhookId   String
   event       String
-  payload     Json
+  payload     String   // JSON 字符串
   statusCode  Int?
   response    String?
   error       String?
@@ -1530,7 +1523,7 @@ model AuditLog {
   resourceType String
   resourceId   String
   status       String
-  details      Json?
+  details      String?  // JSON 字符串
   ipAddress    String
   userAgent    String
   createdAt    DateTime @default(now())
@@ -1539,6 +1532,71 @@ model AuditLog {
   @@index([resourceType])
   @@index([createdAt])
 }
+```
+
+### 8.3 数据库客户端封装
+
+```typescript
+// src/database/client.ts
+
+import { PrismaClient } from '@prisma/client';
+
+// 单例 Prisma 客户端
+export const prisma = new PrismaClient({
+  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+});
+
+// SQLite 特定优化
+export function enableWalMode(): void {
+  if (process.env.DATABASE_URL?.includes('file:')) {
+    // 启用 WAL 模式提升并发性能
+    prisma.$queryRaw`PRAGMA journal_mode=WAL`.catch(() => {});
+  }
+}
+
+// 初始化数据库
+export async function initializeDatabase(): Promise<void> {
+  await prisma.$connect();
+  await enableWalMode();
+  console.log('Database connected');
+}
+
+// 关闭连接
+export async function closeDatabase(): Promise<void> {
+  await prisma.$disconnect();
+}
+```
+
+### 8.4 SQLite 迁移脚本
+
+```bash
+# 生成并应用迁移
+npx prisma migrate dev --name init
+
+# 生产环境部署
+npx prisma migrate deploy
+
+# 从 SQLite 切换到 PostgreSQL
+# 1. 修改 DATABASE_URL
+# 2. 修改 schema.prisma provider = "postgresql"
+# 3. 执行迁移
+npx prisma migrate dev --name switch_to_postgres
+```
+
+### 8.5 数据备份
+
+```bash
+# SQLite 备份（复制文件）
+cp data/codepod.db data/codepod_backup.db
+
+# 压缩备份
+sqlite3 data/codepod.db .dump | gzip > backup_$(date +%Y%m%d).sql.gz
+
+# 定时备份脚本
+#!/bin/bash
+BACKUP_DIR="/backup/codepod"
+DATE=$(date +%Y%m%d_%H%M%S)
+cp "$BACKUP_DIR/codepod.db" "$BACKUP_DIR/codepod_${DATE}.db"
 ```
 
 ---
@@ -1553,6 +1611,9 @@ model AuditLog {
 FROM node:20-alpine
 
 WORKDIR /app
+
+# 创建数据目录
+RUN mkdir -p /app/data && chown -R nodejs:nodejs /app
 
 # 安装依赖
 COPY package*.json ./
@@ -1573,13 +1634,94 @@ RUN npm run build
 
 # 创建非 root 用户
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app
 
 USER nodejs
 
 EXPOSE 3000
 
+# 使用 volume 挂载数据目录
+VOLUME ["/app/data"]
+
 CMD ["node", "dist/index.js"]
+```
+
+### 9.2 Docker Compose 开发配置
+
+```yaml
+# apps/server/docker-compose.yml
+
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data  # SQLite 数据文件
+      - ./logs:/app/logs
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=file:./data/codepod.db
+      - LOG_LEVEL=debug
+      - GRPC_PORT=50051
+    restart: unless-stopped
+
+  # 可选：Redis（生产环境建议使用）
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+
+volumes:
+  redis-data:
+```
+
+### 9.3 package.json 依赖配置
+
+```json
+{
+  "name": "@codepod/server",
+  "version": "0.1.0",
+  "description": "CodePod Server - Control Plane",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "start": "node dist/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.10.0",
+    "better-sqlite3": "^9.4.0",
+    "express": "^4.18.2",
+    "@grpc/grpc-js": "^1.9.14",
+    "@grpc/proto-loader": "^0.7.10",
+    "uuid": "^9.0.0",
+    "prom-client": "^15.1.0",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.0",
+    "@types/uuid": "^9.0.8",
+    "typescript": "^5.3.0",
+    "ts-node": "^10.9.2",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.11",
+    "prisma": "^5.10.0"
+  }
+}
 ```
 
 ### 9.2 环境变量
@@ -1592,14 +1734,16 @@ NODE_ENV=production
 PORT=3000
 LOG_LEVEL=info
 
-# 数据库
-DATABASE_URL=postgresql://user:pass@localhost:5432/codepod
+# 数据库（SQLite 默认）
+DATABASE_URL="file:./data/codepod.db"
+# PostgreSQL（可选）
+# DATABASE_URL="postgresql://user:pass@localhost:5432/codepod"
 
-# Redis
+# Redis（可选，用于会话缓存）
 REDIS_URL=redis://localhost:6379
 
-# 消息队列
-RABBITMQ_URL=amqp://localhost:5672
+# 消息队列（可选，用于异步任务）
+# RABBITMQ_URL=amqp://localhost:5672
 
 # gRPC Server
 GRPC_PORT=50051
@@ -1744,6 +1888,7 @@ apps/server/
 │
 ├── Dockerfile                      # Docker 构建文件
 ├── docker-compose.yml              # 本地开发编排
+├── package.json                    # 依赖配置
 ├── tsconfig.json                   # TypeScript 配置
 ├── jest.config.js                  # Jest 测试配置
 └── package.json                    # 依赖配置
