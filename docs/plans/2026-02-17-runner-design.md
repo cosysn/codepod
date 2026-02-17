@@ -1094,7 +1094,312 @@ func (dr *DisasterRecovery) Restore(backupID string) error {
 }
 ```
 
-## 10. 监控与可观测性
+## 10. Webhook 通知
+
+### 10.1 Webhook 机制
+
+```go
+type WebhookManager struct {
+    clients map[string]*WebhookClient
+    mu     sync.RWMutex
+}
+
+type WebhookEvent struct {
+    EventType string    `json:"event_type"`
+    Timestamp time.Time `json:"timestamp"`
+    Sandbox  *Sandbox  `json:"sandbox,omitempty"`
+    Job      *Job     `json:"job,omitempty"`
+    Error    string   `json:"error,omitempty"`
+}
+
+type WebhookEventType string
+const (
+    EventSandboxCreated  WebhookEventType = "sandbox.created"
+    EventSandboxDeleted  WebhookEventType = "sandbox.deleted"
+    EventSandboxStarted  WebhookEventType = "sandbox.started"
+    EventSandboxStopped  WebhookEventType = "sandbox.stopped"
+    EventJobCompleted    WebhookEventType = "job.completed"
+    EventJobFailed      WebhookEventType = "job.failed"
+    EventRunnerOffline  WebhookEventType = "runner.offline"
+)
+```
+
+### 10.2 Webhook 配置
+
+```go
+type WebhookConfig struct {
+    URL        string            // Webhook URL
+    Events     []WebhookEventType // 订阅的事件类型
+    Secret    string            // 签名密钥
+    Timeout   time.Duration     // 超时时间
+    Retry    *RetryPolicy      // 重试策略
+}
+
+// Webhook 配置示例
+webhooks:
+  - url: "https://example.com/webhook"
+    events:
+      - sandbox.created
+      - sandbox.deleted
+      - job.completed
+    secret: "your-secret"
+    retry:
+      max_attempts: 3
+      initial_delay: 1s
+```
+
+### 10.3 事件推送
+
+```go
+func (wm *WebhookManager) Publish(event WebhookEvent) {
+    // 1. 签名
+    payload := signPayload(event, secret)
+
+    // 2. 发送到所有订阅的 Webhook
+    for _, client := range wm.getSubscribedClients(event.Type) {
+        go func(c *WebhookClient) {
+            err := c.Send(payload)
+            if err != nil {
+                log.Error("Webhook send failed", "error", err)
+            }
+        }(client)
+    }
+}
+
+// 签名
+func signPayload(event WebhookEvent, secret string) string {
+    payload := fmt.Sprintf("%s.%d.%s", event.EventType, event.Timestamp.Unix(), event.Sandbox.ID)
+    h := hmac.New(sha256.New, []byte(secret))
+    h.Write([]byte(payload))
+    return fmt.Sprintf("%s.%s", payload, hex.EncodeToString(h.Sum(nil)))
+}
+```
+
+## 11. 审计日志
+
+### 11.1 审计事件
+
+```go
+type AuditEvent struct {
+    ID         string    `json:"id"`
+    Timestamp  time.Time `json:"timestamp"`
+    UserID    string    `json:"user_id"`
+    Action    string    `json:"action"`
+    Resource  string    `json:"resource"`
+    Result    string    `json:"result"` // success, failed
+    Details   string    `json:"details,omitempty"`
+    IP        string    `json:"ip_address"`
+}
+
+type AuditAction string
+const (
+    AuditCreateSandbox AuditAction = "create.sandbox"
+    AuditDeleteSandbox AuditAction = "delete.sandbox"
+    AuditStartSandbox AuditAction = "start.sandbox"
+    AuditStopSandbox  AuditAction = "stop.sandbox"
+    AuditCreateSnapshot AuditAction = "create.snapshot"
+    AuditRestoreSnapshot AuditAction = "restore.snapshot"
+    AuditUpdateConfig  AuditAction = "update.config"
+    AuditCreateAPIKey AuditAction = "create.api_key"
+    AuditDeleteAPIKey AuditAction = "delete.api_key"
+)
+```
+
+### 11.2 审计存储
+
+```go
+type AuditStore interface {
+    Write(event *AuditEvent) error
+    Query(query *AuditQuery) ([]*AuditEvent, error)
+}
+
+type AuditQuery struct {
+    UserID    string
+    Action   AuditAction
+    StartTime time.Time
+    EndTime  time.Time
+    Resource string
+    Limit    int
+    Offset   int
+}
+
+// 审计日志存储
+type AuditLogger struct {
+    store AuditStore
+}
+
+func (al *AuditLogger) Log(action AuditAction, userID, resource string, result string, details string) {
+    event := &AuditEvent{
+        ID:        uuid.New().String(),
+        Timestamp: time.Now(),
+        UserID:    userID,
+        Action:    string(action),
+        Resource:  resource,
+        Result:    result,
+        Details:   details,
+    }
+
+    al.store.Write(event)
+}
+```
+
+### 11.3 审计查询
+
+```go
+// 查询审计日志
+func (al *AuditLogger) QuerySandboxHistory(sandboxID string) ([]*AuditEvent, error) {
+    return al.store.Query(&AuditQuery{
+        Resource: sandboxID,
+        Limit:   100,
+    })
+}
+
+// 审计报表
+func (al *AuditLogger) GenerateReport(start, end time.Time) (*AuditReport, error) {
+    events, err := al.store.Query(&AuditQuery{
+        StartTime: start,
+        EndTime:  end,
+    })
+    if err != nil {
+        return nil, err
+    }
+
+    return &AuditReport{
+        Period:      fmt.Sprintf("%s - %s", start, end),
+        TotalEvents: len(events),
+        ByAction:    groupByAction(events),
+        ByUser:      groupByUser(events),
+    }, nil
+}
+```
+
+## 12. 多 Workspace 支持
+
+### 12.1 Workspace 概念
+
+```go
+type Workspace struct {
+    ID          string
+    Name        string
+    Description string
+    OwnerID     string
+    Quota       *Quota
+    Settings    *WorkspaceSettings
+    CreatedAt   time.Time
+    UpdatedAt   time.Time
+}
+
+type WorkspaceSettings struct {
+    DefaultNetwork string
+    DNSEnabled   bool
+    DNSSuffix    string
+    DefaultEnv   map[string]string
+}
+```
+
+### 12.2 Workspace 隔离
+
+```go
+type Workspace隔离 struct {
+    network    string   // 独立网络
+    quota      *Quota  // 资源配额
+    sandboxes  []string // Sandbox 列表
+}
+
+func (w *Workspace) Isolate() error {
+    // 1. 创建独立网络
+    network, err := docker.CreateNetwork(fmt.Sprintf("codepod-ws-%s", w.ID))
+    if err != nil {
+        return err
+    }
+
+    // 2. 配置网络策略
+    network.AttachNetworkPolicy(map[string]string{
+        "isolate": "true",
+    })
+
+    // 3. 存储 Workspace 信息
+    return w.store.Save(w)
+}
+```
+
+### 12.3 Workspace 管理
+
+```go
+type WorkspaceManager struct {
+    store AuditStore
+    quota  *QuotaManager
+}
+
+func (wm *WorkspaceManager) CreateWorkspace(req *CreateWorkspaceRequest) (*Workspace, error) {
+    // 1. 检查配额
+    if err := wm.quota.CheckQuota(req.OwnerID, req.Quota); err != nil {
+        return nil, err
+    }
+
+    // 2. 创建 Workspace
+    workspace := &Workspace{
+        ID:          uuid.New().String(),
+        Name:        req.Name,
+        Description: req.Description,
+        OwnerID:     req.OwnerID,
+        Quota:       req.Quota,
+        Settings:    req.Settings,
+        CreatedAt:   time.Now(),
+    }
+
+    // 3. 创建网络
+    if err := wm.createNetwork(workspace); err != nil {
+        return nil, err
+    }
+
+    // 4. 保存
+    return workspace, wm.store.Save(workspace)
+}
+
+func (wm *WorkspaceManager) ListWorkspaces(userID string) ([]*Workspace, error) {
+    return wm.store.ListByUser(userID)
+}
+```
+
+### 12.4 Workspace 资源配额
+
+```go
+type WorkspaceQuota struct {
+    MaxSandboxes    int   // 最大 Sandbox 数
+    MaxCPU         int64 // CPU 核心数
+    MaxMemory      int64 // 内存 (bytes)
+    MaxStorage     int64 // 存储 (bytes)
+    MaxSnapshots   int   // 最大快照数
+    MaxWorkspaces  int   // 最大工作空间数
+}
+
+// Workspace 配额检查
+func (qm *QuotaManager) CheckWorkspaceQuota(workspaceID string, req *CreateSandboxRequest) error {
+    ws, err := qm.store.GetWorkspace(workspaceID)
+    if err != nil {
+        return err
+    }
+
+    used := ws.GetUsage()
+
+    if used.Sandboxes+1 > ws.Quota.MaxSandboxes {
+        return ErrWorkspaceSandboxQuotaExceeded
+    }
+
+    if used.CPU+req.CPU > ws.Quota.MaxCPU {
+        return ErrWorkspaceCPUQuotaExceeded
+    }
+
+    if used.Memory+req.Memory > ws.Quota.MaxMemory {
+        return ErrWorkspaceMemoryQuotaExceeded
+    }
+
+    return nil
+}
+```
+
+## 13. 监控与可观测性
 
 ### 10.1 Prometheus 指标
 
