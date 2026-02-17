@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"os/signal"
@@ -33,7 +34,10 @@ func main() {
 		Token:       cfg.Agent.Token,
 	})
 
-	if err := server.Start(); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	if err := server.Start(ctx); err != nil {
 		log.Fatalf("Failed to start SSH server: %v", err)
 	}
 
@@ -42,6 +46,7 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
+	cancel()
 	log.Println("Shutting down...")
 	server.Stop()
 }

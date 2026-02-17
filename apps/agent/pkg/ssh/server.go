@@ -21,13 +21,22 @@ type SSHServer struct {
 	config    *ServerConfig
 	mu        sync.RWMutex
 	listeners []net.Listener
+	running   bool
 }
 
 func NewServer(cfg *ServerConfig) *SSHServer {
 	return &SSHServer{config: cfg}
 }
 
-func (s *SSHServer) Start() error {
+func (s *SSHServer) Start(ctx context.Context) error {
+	s.mu.Lock()
+	if s.running {
+		s.mu.Unlock()
+		return fmt.Errorf("server already running")
+	}
+	s.running = true
+	s.mu.Unlock()
+
 	addr := fmt.Sprintf(":%d", s.config.Port)
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -40,13 +49,28 @@ func (s *SSHServer) Start() error {
 	log.Printf("SSH Server listening on %s", addr)
 
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Printf("Failed to accept connection: %v", err)
-			continue
+		select {
+		case <-ctx.Done():
+			s.Stop()
+			return ctx.Err()
+		default:
+			conn, err := listener.Accept()
+			if err != nil {
+				if s.isShuttingDown() {
+					return nil
+				}
+				log.Printf("Failed to accept connection: %v", err)
+				continue
+			}
+			go s.handleConnection(conn)
 		}
-		go s.handleConnection(conn)
 	}
+}
+
+func (s *SSHServer) isShuttingDown() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return !s.running
 }
 
 func (s *SSHServer) handleConnection(conn net.Conn) {
@@ -99,6 +123,7 @@ func (s *SSHServer) handleSession(channel ssh.Channel) {
 func (s *SSHServer) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.running = false
 	for _, listener := range s.listeners {
 		listener.Close()
 	}
