@@ -40,7 +40,7 @@ Runner 是 CodePod 的核心编排引擎，负责 Sandbox 容器的生命周期�
 │  │                   核心层                         │   │
 │  │                                              │   │
 │  │  ┌─────────────────────────────────────────┐ │   │
-│  │  │           Task Scheduler                │ │   │
+│  │  │           Job Scheduler                │ │   │
 │  │  │  - 任务队列管理                         │ │   │
 │  │  │  - 任务状态机                          │ │   │
 │  │  │  - 并发控制                            │ │   │
@@ -85,43 +85,43 @@ Runner 是 CodePod 的核心编排引擎，负责 Sandbox 容器的生命周期�
 
 ### 2.2 模块设计
 
-#### 2.2.1 Task Scheduler
+#### 2.2.1 Job Scheduler
 
 ```go
 // pkg/scheduler/scheduler.go
 
 type Scheduler struct {
-    queue    *TaskQueue
+    queue    *JobQueue
     workers  int
     executor *Executor
 }
 
-type Task struct {
+type Job struct {
     ID        string
-    Type      TaskType
+    Type      JobType
     Request   interface{}
-    Status    TaskStatus
+    Status    JobStatus
     CreatedAt time.Time
     StartedAt time.Time
     FinishedAt time.Time
     Error     error
 }
 
-type TaskType int
+type JobType int
 const (
-    TaskCreateSandbox TaskType = iota
-    TaskDeleteSandbox
-    TaskCreateSnapshot
-    TaskRestoreSnapshot
-    TaskUpdateAgent
+    JobCreateSandbox JobType = iota
+    JobDeleteSandbox
+    JobCreateSnapshot
+    JobRestoreSnapshot
+    JobUpdateAgent
 )
 
-type TaskStatus int
+type JobStatus int
 const (
-    TaskPending TaskStatus = iota
-    TaskRunning
-    TaskSuccess
-    TaskFailed
+    JobPending JobStatus = iota
+    JobRunning
+    JobSuccess
+    JobFailed
 )
 ```
 
@@ -392,7 +392,7 @@ type RunnerStatus struct {
     Version     string    `json:"version"`
     Uptime      int64     `json:"uptime"`
     Resources   Resources  `json:"resources"`
-    TaskQueue   TaskQueueStatus `json:"task_queue"`
+    JobQueue   JobQueueStatus `json:"job_queue"`
     Sandboxes   []SandboxStatus `json:"sandboxes"`
 }
 
@@ -402,7 +402,7 @@ type Resources struct {
     Disk    int64   `json:"disk"`   // bytes
 }
 
-type TaskQueueStatus struct {
+type JobQueueStatus struct {
     Pending   int `json:"pending"`
     Running   int `json:"running"`
     Completed int `json:"completed"`
@@ -564,7 +564,7 @@ spec:
   - type: External
     external:
       metric:
-        name: runner_task_queue_length
+        name: runner_job_queue_length
       target:
         type: AverageValue
         averageValue: "10"
