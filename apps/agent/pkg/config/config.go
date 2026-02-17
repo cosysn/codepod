@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 )
 
 // Config represents the Agent configuration
@@ -40,6 +41,34 @@ func Load() (*Config, error) {
 			IdleTimeout: 1800,
 		},
 	}, nil
+}
+
+func LoadFromEnv() *Config {
+	return &Config{
+		Agent: AgentConfig{
+			Token:     os.Getenv("AGENT_TOKEN"),
+			ServerURL: os.Getenv("AGENT_SERVER_URL"),
+			SandboxID: os.Getenv("AGENT_SANDBOX_ID"),
+		},
+		SSH: SSHConfig{
+			Port:        getEnvIntOrDefault("AGENT_SSH_PORT", 22),
+			HostKeys:    []string{"/etc/ssh/ssh_host_rsa_key"},
+			MaxSessions: getEnvIntOrDefault("AGENT_MAX_SESSIONS", 10),
+			IdleTimeout: getEnvIntOrDefault("AGENT_IDLE_TIMEOUT", 1800),
+		},
+	}
+}
+
+func getEnvIntOrDefault(key string, defaultVal int) int {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	result, err := strconv.Atoi(val)
+	if err != nil {
+		return defaultVal
+	}
+	return result
 }
 
 func (c *Config) Validate() error {
