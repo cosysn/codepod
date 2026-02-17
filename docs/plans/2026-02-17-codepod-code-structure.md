@@ -1,525 +1,511 @@
 # CodePod 代码目录与构建系统设计
 
-**版本**: v1.0
+**版本**: v2.0
 **日期**: 2026-02-17
 
 ## 1. 项目整体结构
 
 ```
 codepod/
-├── cmd/                          # 命令行入口
-│   ├── cli/                      # CLI 入口
-│   │   ├── main.go
-│   │   └── main_test.go
-│   └── server/                   # Server 入口
-│       ├── main.go
-│       └── main_test.go
-│
-├── pkg/                          # 公共包 (可被外部导入)
-│   ├── api/                      # API 类型定义
-│   │   ├── types.go
-│   │   └── types_test.go
-│   ├── client/                   # 客户端库
-│   │   ├── client.go
-│   │   └── client_test.go
-│   └── errors/                   # 错误定义
-│       ├── errors.go
-│       └── errors_test.go
-│
-├── internal/                     # 内部包 (不可被外部导入)
-│   ├── server/                   # Server 实现
-│   │   ├── server.go
-│   │   ├── server_test.go
-│   │   ├── handler/             # HTTP 处理器
-│   │   │   ├── sandbox.go
-│   │   │   ├── snapshot.go
-│   │   │   └── handler_test.go
-│   │   ├── service/             # 业务逻辑
-│   │   │   ├── sandbox.go
-│   │   │   ├── snapshot.go
-│   │   │   └── service_test.go
-│   │   ├── storage/             # 数据存储
-│   │   │   ├── db.go
-│   │   │   └── cache.go
-│   │   └── middleware/          # 中间件
-│   │       ├── auth.go
-│   │       ├── log.go
-│   │       └── middleware_test.go
+├── apps/                          # 核心应用
+│   ├── agent/                      # Agent (Go)
+│   │   ├── cmd/                   # 入口
+│   │   │   └── main.go
+│   │   ├── pkg/                   # 公共包
+│   │   │   ├── ssh/              # SSH 服务器
+│   │   │   ├── process/          # 进程管理
+│   │   │   ├── exec/             # 命令执行
+│   │   │   ├── tunnel/           # 端口转发
+│   │   │   └── update/           # 自动更新
+│   │   ├── internal/             # 内部包
+│   │   │   └── agent/           # Agent 核心逻辑
+│   │   ├── go.mod
+│   │   └── go.sum
 │   │
-│   ├── runner/                   # Runner 实现
-│   │   ├── runner.go
-│   │   ├── runner_test.go
-│   │   ├── docker/              # Docker 操作
-│   │   │   ├── client.go
-│   │   │   ├── container.go
-│   │   │   ├── image.go
-│   │   │   └── docker_test.go
-│   │   ├── job/                 # 任务调度
-│   │   │   ├── scheduler.go
-│   │   │   ├── queue.go
-│   │   │   └── job_test.go
-│   │   └── storage/             # 存储管理
-│   │       ├── volume.go
-│   │       └── snapshot.go
+│   ├── runner/                    # Runner (Go)
+│   │   ├── cmd/
+│   │   │   └── main.go
+│   │   ├── pkg/
+│   │   │   ├── docker/           # Docker 操作
+│   │   │   ├── job/              # 任务调度
+│   │   │   └── storage/          # 存储管理
+│   │   ├── internal/
+│   │   │   └── runner/           # Runner 核心逻辑
+│   │   ├── go.mod
+│   │   └── go.sum
 │   │
-│   └── agent/                    # Agent 实现
-│       ├── main.go
-│       ├── agent.go
-│       ├── ssh/                  # SSH 服务器
-│       │   ├── server.go
-│       │   ├── session.go
-│       │   ├── auth.go
-│       │   └── ssh_test.go
-│       ├── process/             # 进程管理
-│       │   ├── manager.go
-│       │   ├── process.go
-│       │   └── process_test.go
-│       ├── exec/                # 命令执行
-│       │   ├── executor.go
-│       │   └── exec_test.go
-│       ├── tunnel/              # 端口转发
-│       │   ├── manager.go
-│       │   └── tunnel_test.go
-│       └── update/              # 自动更新
-│           ├── updater.go
-│           └── update_test.go
+│   ├── server/                    # Server (Node.js/TypeScript)
+│   │   ├── src/
+│   │   │   ├── cmd/              # 入口
+│   │   │   │   └── index.ts
+│   │   │   ├── routes/           # 路由
+│   │   │   ├── services/         # 服务
+│   │   │   ├── middleware/       # 中间件
+│   │   │   └── types/            # 类型
+│   │   ├── package.json
+│   │   └── tsconfig.json
+│   │
+│   └── cli/                      # CLI (Node.js/TypeScript)
+│       ├── src/
+│       │   ├── cmd/              # 入口
+│       │   │   └── index.ts
+│       │   ├── commands/         # 命令
+│       │   │   ├── create.ts
+│       │   │   ├── delete.ts
+│       │   │   ├── list.ts
+│       │   │   ├── ssh.ts
+│       │   │   └── snapshot.ts
+│       │   └── utils/            # 工具
+│       ├── package.json
+│       └── tsconfig.json
 │
-├── proto/                       # Protobuf 定义
-│   ├── runner.proto
-│   ├── agent.proto
-│   └── buf.yaml                # Buf 配置
-│
-├── server/                      # Server 前端 (Node.js/TypeScript)
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── src/
-│   │   ├── index.ts            # 入口
-│   │   ├── routes/             # 路由
+├── libs/                          # 多语言 SDK
+│   ├── sdk-go/                   # Go SDK
+│   │   ├── client/               # 客户端
+│   │   ├── types/               # 类型定义
+│   │   ├── sandbox/              # Sandbox 操作
+│   │   ├── snapshot/             # 快照操作
+│   │   ├── go.mod
+│   │   └── go.sum
+│   │
+│   ├── sdk-python/               # Python SDK
+│   │   ├── codepod/
+│   │   │   ├── __init__.py
+│   │   │   ├── client.py
+│   │   │   ├── sandbox.py
+│   │   │   └── snapshot.py
+│   │   ├── pyproject.toml
+│   │   └── setup.py
+│   │
+│   ├── sdk-typescript/           # TypeScript SDK
+│   │   ├── src/
+│   │   │   ├── index.ts
+│   │   │   ├── client.ts
 │   │   │   ├── sandbox.ts
 │   │   │   └── snapshot.ts
-│   │   ├── services/           # 服务
-│   │   │   ├── sandbox.ts
-│   │   │   └── snapshot.ts
-│   │   ├── middleware/         # 中间件
-│   │   │   ├── auth.ts
-│   │   │   └── logger.ts
-│   │   └── types/              # 类型
-│   │       └── index.ts
-│   ├── dist/                   # 编译输出
-│   └── test/                   # 测试
+│   │   ├── package.json
+│   │   └── tsconfig.json
+│   │
+│   └── sdk-rust/                 # Rust SDK (可选)
+│       ├── src/
+│       │   ├── lib.rs
+│       │   ├── client.rs
+│       │   └── sandbox.rs
+│       ├── Cargo.toml
+│       └── Cargo.lock
 │
-├── sdk/                         # SDK (Node.js/TypeScript)
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── src/
-│   │   ├── index.ts
-│   │   ├── client.ts
-│   │   ├── sandbox.ts
-│   │   ├── snapshot.ts
-│   │   └── types.ts
-│   ├── dist/
-│   └── test/
+├── proto/                         # Protobuf 定义
+│   ├── runner/
+│   │   ├── runner.proto
+│   │   └── runner.pb.go
+│   ├── agent/
+│   │   ├── agent.proto
+│   │   └── agent.pb.go
+│   └── buf.yaml
 │
-├── cli/                         # CLI (Node.js/TypeScript)
-│   ├── package.json
-│   ├── tsconfig.json
-│   ├── src/
-│   │   ├── index.ts
-│   │   ├── commands/           # 命令
-│   │   │   ├── create.ts
-│   │   │   ├── delete.ts
-│   │   │   ├── list.ts
-│   │   │   ├── ssh.ts
-│   │   │   └── snapshot.ts
-│   │   └── utils/              # 工具
-│   │       ├── config.ts
-│   │       └── ssh.ts
-│   ├── dist/
-│   └── test/
+├── docker/                        # Docker 构建文件
+│   ├── Dockerfile.agent
+│   ├── Dockerfile.runner
+│   ├── Dockerfile.server
+│   ├── docker-compose.yml
+│   └── scripts/
+│       ├── build-agent.sh
+│       ├── build-runner.sh
+│       ├── build-server.sh
+│       └── build-all.sh
 │
-├── scripts/                     # 构建脚本
-│   ├── build-agent.sh
-│   ├── build-runner.sh
-│   ├── build-server.sh
-│   ├── build-cli.sh
-│   ├── build-sdk.sh
+├── .github/                       # GitHub 配置
+│   └── workflows/
+│       ├── build.yml              # 构建 workflow
+│       ├── test.yml              # 测试 workflow
+│       ├── release.yml           # 发布 workflow
+│       └── docker.yml            # Docker 构建
+│
+├── scripts/                       # 构建脚本
+│   ├── build-go.sh
 │   ├── build-all.sh
-│   ├── docker/
-│   │   ├── Dockerfile.agent
-│   │   ├── Dockerfile.runner
-│   │   └── Dockerfile.server
-│   └── build-docker.sh
+│   └── generate-proto.sh
 │
-├── docs/                       # 文档
+├── docs/                          # 文档
 │   └── plans/
 │
-├── Makefile                    # 构建 Makefile
-├── go.mod                      # Go 模块
-├── go.sum
-├── package.json               # Node.js 根配置 (workspace)
-├── lerna.json                 # Lerna 配置 (monorepo)
-├── buf.yaml                   # Protobuf 配置
-├── .golangci.yml             # Go lint 配置
-├── .eslintrc.js              # ESLint 配置
-├── .prettierrc               # Prettier 配置
+├── go.work                        # Go workspace
+├── go.work.sum
+├── Makefile
+├── package.json                   # Node.js 根配置 (workspace)
+├── buf.gen.yaml                   # Protobuf 生成配置
+├── .golangci.yml                  # Go lint 配置
+├── .eslintrc.js                   # ESLint 配置
 └── README.md
 ```
 
-## 2. 技术栈与构建工具
+## 2. Go Workspace
 
-### 2.1 技术栈
+### 2.1 go.work
+
+```go
+// go.work
+go 1.21
+
+use (
+	./apps/agent
+	./apps/runner
+	./libs/sdk-go
+)
+```
+
+### 2.2 模块依赖关系
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                   Go Workspace 结构                       │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  apps/agent                                            │
+│  apps/runner                                           │
+│       │                                                │
+│       │ 依赖                                           │
+│       ▼                                                │
+│  libs/sdk-go ◄── proto/                               │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+## 3. 技术栈
 
 | 组件 | 语言 | 构建工具 | 包管理 |
 |------|------|----------|--------|
-| CLI | TypeScript | esbuild/tsc | npm/yarn/pnpm |
-| SDK | TypeScript | esbuild/tsc | npm/yarn/pnpm |
-| Server | TypeScript | esbuild/tsc | npm/yarn/pnpm |
+| CLI | TypeScript | esbuild/tsc | npm/pnpm |
+| Server | TypeScript | esbuild/tsc | npm/pnpm |
+| SDK (TS) | TypeScript | esbuild/tsc | npm/pnpm |
+| SDK (Python) | Python | setuptools/pip | pip |
+| SDK (Go) | Go | go build | go mod |
 | Runner | Go | go build | go mod |
 | Agent | Go | go build | go mod |
-| Protobuf | - | buf | - |
 
-### 2.2 Monorepo 结构
+## 4. 构建系统
 
+### 4.1 Makefile
+
+```makefile
+.PHONY: all build test clean proto docker
+
+# 默认目标
+all: build
+
+# 构建所有
+build: build-go build-ts build-python
+
+# 构建 Go 组件
+build-go:
+	cd apps/agent && go build -o ../../bin/agent ./cmd
+	cd apps/runner && go build -o ../../bin/runner ./cmd
+
+# 构建 TypeScript 组件
+build-ts:
+	cd apps/server && npm run build
+	cd apps/cli && npm run build
+	cd libs/sdk-typescript && npm run build
+
+# 构建 Python SDK
+build-python:
+	cd libs/sdk-python && python -m build
+
+# 生成 Protobuf
+proto:
+	buf generate
+
+# 测试
+test: test-go test-ts test-python
+
+test-go:
+	cd apps/agent && go test ./...
+	cd apps/runner && go test ./...
+	cd libs/sdk-go && go test ./...
+
+test-ts:
+	cd apps/server && npm test
+	cd apps/cli && npm test
+
+test-python:
+	cd libs/sdk-python && pytest
+
+# Docker 构建
+docker:
+	./docker/scripts/build-all.sh
+
+# 清理
+clean:
+	rm -rf bin/
+	find . -name "dist" -type d -exec rm -rf {} +
 ```
-codepod/
-├── package.json              # 根 workspace 配置
-├── lerna.json                # Lerna 多包管理
-│
-├── server/package.json       # Server 包
-├── sdk/package.json          # SDK 包
-└── cli/package.json          # CLI 包
-```
 
-**根 package.json:**
-```json
-{
-  "name": "codepod",
-  "private": true,
-  "workspaces": [
-    "server",
-    "sdk",
-    "cli"
-  ],
-  "scripts": {
-    "build": "lerna run build",
-    "test": "lerna run test",
-    "lint": "lerna run lint"
-  }
-}
-```
-
-## 3. 构建系统设计
-
-### 3.1 构建流程
+### 4.2 构建流程
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    构建流程                                │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
-│  1. 准备阶段                                           │
-│     ├── 安装 Go 依赖 (go mod download)                │
-│     ├── 安装 Node.js 依赖 (npm install)               │
-│     └── 生成 Protobuf 代码 (buf generate)              │
+│  1. Protobuf 代码生成                                  │
+│     buf generate                                       │
 │                                                         │
-│  2. 编译阶段                                           │
-│     ├── 构建 Agent (Go)                               │
-│     ├── 构建 Runner (Go)                              │
-│     ├── 构建 Server (TypeScript → JavaScript)         │
-│     ├── 构建 SDK (TypeScript → JavaScript)            │
-│     └── 构建 CLI (TypeScript → JavaScript)            │
+│  2. Go 组件构建                                        │
+│     ├── apps/agent → bin/agent                        │
+│     ├── apps/runner → bin/runner                       │
+│     └── libs/sdk-go → sdk-go                          │
 │                                                         │
-│  3. 打包阶段                                           │
-│     ├── 打包 Agent 到 Docker 镜像                      │
-│     ├── 打包 Runner 到 Docker 镜像                    │
-│     ├── 打包 Server 到 Docker 镜像                    │
-│     └── 创建发布包 (tar/zip)                          │
+│  3. TypeScript 组件构建                                │
+│     ├── apps/server → apps/server/dist                │
+│     ├── apps/cli → apps/cli/dist                     │
+│     └── libs/sdk-typescript → libs/sdk-typescript/dist│
 │                                                         │
-│  4. 测试阶段                                           │
-│     ├── Go 测试 (go test)                             │
-│     ├── Node.js 测试 (jest)                           │
-│     ├── Protobuf 验证 (buf lint)                      │
-│     └── 集成测试                                      │
+│  4. Python SDK 构建                                    │
+│     └── libs/sdk-python → wheel package               │
+│                                                         │
+│  5. Docker 镜像构建                                    │
+│     ├── codepod/agent:latest                         │
+│     ├── codepod/runner:latest                        │
+│     └── codepod/server:latest                        │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
 ```
 
-### 3.2 Makefile
+## 5. GitHub Workflows
 
-```makefile
-# Makefile
+### 5.1 构建 Workflow
 
-.PHONY: all build test clean proto agent runner server sdk cli docker
+```yaml
+# .github/workflows/build.yml
+name: Build
 
-# 默认目标
-all: build
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
-# 生成 Protobuf
-proto:
-	buf generate
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-# 构建 Agent
-agent:
-	cd agent && go build -o ../../bin/agent ./...
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          workspace: go.work
 
-# 构建 Runner
-runner:
-	cd runner && go build -o ../../bin/runner ./...
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-# 构建 Server
-server:
-	cd server && npm run build
+      - name: Install dependencies
+        run: |
+          go mod download
+          npm ci
 
-# 构建 SDK
-sdk:
-	cd sdk && npm run build
+      - name: Generate Proto
+        run: buf generate
 
-# 构建 CLI
-cli:
-	cd cli && npm run build
+      - name: Build
+        run: make build
 
-# 构建全部
-build: proto agent runner server sdk cli
-
-# 测试
-test: test-go test-node
-
-test-go:
-	cd agent && go test ./...
-	cd runner && go test ./...
-
-test-node:
-	cd server && npm test
-	cd sdk && npm test
-	cd cli && npm test
-
-# Docker 镜像
-docker: docker-build
-
-docker-build:
-	./scripts/build-docker.sh
-
-# 清理
-clean:
-	rm -rf bin/
-	cd server && rm -rf dist/
-	cd sdk && rm -rf dist/
-	cd cli && rm -rf dist/
+      - name: Test
+        run: make test
 ```
 
-### 3.3 构建脚本
+### 5.2 Docker 构建 Workflow
 
-**scripts/build-all.sh:**
-```bash
-#!/bin/bash
-set -e
+```yaml
+# .github/workflows/docker.yml
+name: Docker Build
 
-echo "Building CodePod..."
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
 
-# 1. 生成 Protobuf
-echo "Generating Protobuf..."
-buf generate
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-# 2. 构建 Go 组件
-echo "Building Agent..."
-cd agent && go build -o ../bin/agent .
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
-echo "Building Runner..."
-cd runner && go build -o ../bin/runner .
-
-# 3. 构建 Node.js 组件
-echo "Building Server..."
-cd server && npm run build
-
-echo "Building SDK..."
-cd sdk && npm run build
-
-echo "Building CLI..."
-cd cli && npm run build
-
-echo "Build complete!"
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.server
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: codepod/server:latest
 ```
 
-## 4. Docker 构建
+## 6. Docker 构建
 
-### 4.1 Agent Docker 镜像
-
-```dockerfile
-# Dockerfile.agent
-FROM golang:1.21-alpine AS builder
-
-WORKDIR /build
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o agent ./agent
-
-FROM alpine:3.18
-
-RUN apk add --no-cache openssh-server ca-certificates
-
-WORKDIR /app
-COPY --from=builder /build/agent /app/agent
-
-EXPOSE 22
-
-ENTRYPOINT ["/app/agent"]
-```
-
-### 4.2 Runner Docker 镜像
-
-```dockerfile
-# Dockerfile.runner
-FROM golang:1.21-alpine AS builder
-
-WORKDIR /build
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-RUN CGO_ENABLED=1 go build -o runner ./runner
-
-FROM alpine:3.18
-
-RUN apk add --no-cache docker-cli ca-certificates
-
-WORKDIR /app
-COPY --from=builder /build/runner /app/runner
-COPY --from=builder /build/bin/agent /app/bin/agent
-
-ENTRYPOINT ["/app/runner"]
-```
-
-### 4.3 Server Docker 镜像
-
-```dockerfile
-# Dockerfile.server
-FROM node:20-alpine AS builder
-
-WORKDIR /build
-COPY package*.json ./
-RUN npm ci
-
-COPY . .
-RUN npm run build
-
-FROM node:20-alpine
-
-WORKDIR /app
-COPY --from=builder /build/dist ./dist
-COPY --from=builder /build/node_modules ./node_modules
-
-EXPOSE 3000
-
-CMD ["node", "dist/index.js"]
-```
-
-## 5. 目录设计原则
-
-### 5.1 Go 项目结构 (Standard Go Project Layout)
+### 6.1 Docker 目录结构
 
 ```
-cmd/           # 可执行入口
-pkg/           # 可被外部导入的公共库
-internal/      # 内部包，不可被外部导入
-proto/         # Protobuf 定义
+docker/
+├── Dockerfile.agent              # Agent 镜像
+├── Dockerfile.runner            # Runner 镜像
+├── Dockerfile.server            # Server 镜像
+├── docker-compose.yml           # 本地开发环境
+├── docker-compose.prod.yml     # 生产环境
+└── scripts/
+    ├── build-agent.sh
+    ├── build-runner.sh
+    ├── build-server.sh
+    └── build-all.sh
 ```
 
-### 5.2 Node.js 项目结构
+### 6.2 docker-compose.yml
+
+```yaml
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+    ports:
+      - "3000:3000"
+    environment:
+      - DB_PATH=/data/codepod.db
+      - JWT_SECRET=secret
+    volumes:
+      - server-data:/data
+
+  runner:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.runner
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    privileged: true
+
+volumes:
+  server-data:
+```
+
+## 7. 多语言 SDK 设计
+
+### 7.1 Go SDK
 
 ```
-src/           # 源代码
-dist/          # 编译输出
-test/          # 测试文件
+libs/sdk-go/
+├── client.go           # 客户端
+├── sandbox.go         # Sandbox 操作
+├── snapshot.go        # 快照操作
+├── types.go          # 类型定义
+└── go.mod
 ```
 
-### 5.3 命名规范
-
-| 类型 | 规范 | 示例 |
-|------|------|------|
-| 文件 | 小写字母 + 连字符 | `sandbox_handler.ts` |
-| 目录 | 小写字母 + 连字符 | `internal/server` |
-| 包 | 小写字母 | `internal/server` |
-| 类 | 大驼峰 | `SandboxHandler` |
-| 函数 | 小驼峰 | `createSandbox` |
-| 常量 | 全大写 + 下划线 | `MAX_RETRIES` |
-
-## 6. 依赖管理
-
-### 6.1 Go 依赖
-
-**go.mod:**
 ```go
-module github.com/codepod/codepod
+package codepod
 
-go 1.21
+import "github.com/codepod/codepod/libs/sdk-go"
 
-require (
-	github.com/docker/docker v24.0.0
-	google.golang.org/grpc v1.58.0
-	google.golang.org/protobuf v1.31.0
+func main() {
+    client := codepod.NewClient("https://api.example.com", "api-key")
+    sandbox, err := client.CreateSandbox(&codepod.CreateOptions{
+        Type:  "dev-container",
+        Image: "python:3.11",
+    })
+}
+```
+
+### 7.2 Python SDK
+
+```
+libs/sdk-python/
+├── codepod/
+│   ├── __init__.py
+│   ├── client.py
+│   ├── sandbox.py
+│   └── snapshot.py
+├── pyproject.toml
+└── setup.py
+```
+
+```python
+from codepod import Client
+
+client = Client("https://api.example.com", "api-key")
+sandbox = client.create_sandbox(
+    type="dev-container",
+    image="python:3.11"
 )
 ```
 
-### 6.2 Node.js 依赖
+### 7.3 TypeScript SDK
 
-**server/package.json:**
+```typescript
+import { CodePod } from '@codepod/sdk';
+
+const client = new CodePod({
+  endpoint: 'https://api.example.com',
+  apiKey: 'api-key'
+});
+
+const sandbox = await client.createSandbox({
+  type: 'dev-container',
+  image: 'python:3.11'
+});
+```
+
+## 8. 依赖管理
+
+### 8.1 Node.js Workspace
+
 ```json
 {
-  "name": "@codepod/server",
-  "version": "1.0.0",
-  "main": "dist/index.js",
+  "name": "codepod",
+  "private": true,
+  "workspaces": [
+    "apps/server",
+    "apps/cli",
+    "libs/sdk-typescript"
+  ],
   "scripts": {
-    "build": "tsc",
-    "test": "jest",
-    "lint": "eslint src --ext .ts"
-  },
-  "dependencies": {
-    "express": "^4.18.0",
-    "@codepod/sdk": "1.0.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.0.0",
-    "@types/node": "^20.0.0",
-    "jest": "^29.0.0",
-    "eslint": "^8.0.0"
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces"
   }
 }
 ```
 
-## 7. 发布流程
+### 8.2 Go Workspace
 
-### 7.1 版本号规则
+```go
+// go.work
+go 1.21
 
-采用语义化版本 `vMAJOR.MINOR.PATCH`:
-- MAJOR: 不兼容的 API 变更
-- MINOR: 向后兼容的功能新增
-- PATCH: 向后兼容的 bug 修复
+use (
+	./apps/agent
+	./apps/runner
+	./libs/sdk-go
+)
 
-### 7.2 发布步骤
+// apps/agent/go.mod
+module github.com/codepod/codepod/apps/agent
 
-```bash
-# 1. 更新版本号
-npm version patch  # 或 minor/major
+go 1.21
 
-# 2. 构建所有组件
-make build
-
-# 3. 运行测试
-make test
-
-# 4. 构建 Docker 镜像
-make docker
-
-# 5. 标记 Git
-git tag v1.0.0
-git push origin v1.0.0
+require (
+	github.com/codepod/codepod/libs/sdk-go v0.0.0
+	github.com/docker/docker v24.0.0
+)
 ```
 
-## 8. 开发工作流
+## 9. 开发工作流
 
-### 8.1 本地开发
+### 9.1 本地开发
 
 ```bash
 # 1. 克隆代码
@@ -527,68 +513,72 @@ git clone https://github.com/codepod/codepod.git
 cd codepod
 
 # 2. 安装依赖
-npm install
+go work sync
 go mod download
+npm install
 
 # 3. 生成 Protobuf
 buf generate
 
-# 4. 启动 Server
-cd server && npm run dev
+# 4. 启动 Server (开发模式)
+cd apps/server && npm run dev
 
 # 5. 启动 Runner (开发模式)
-cd runner && go run . --dev
+cd apps/runner && go run cmd/main.go --dev
 
 # 6. 使用 CLI
-cd cli && npm link
+cd apps/cli && npm link
 codepod list
 ```
 
-### 8.2 热重载
+### 9.2 Docker 开发
 
-- Server: 使用 `nodemon` 或 `ts-node-dev`
-- Runner: 使用 `air` (Go 热重载)
-- Agent: 手动重启
+```bash
+# 启动所有服务
+cd docker
+docker-compose up -d
 
-## 9. 跨语言调用
+# 查看日志
+docker-compose logs -f
 
-### 9.1 Protobuf 定义
-
-```protobuf
-// proto/runner.proto
-syntax = "proto3";
-
-package codepod;
-
-service RunnerService {
-  rpc CreateSandbox(CreateSandboxRequest) returns (SandboxInfo);
-  rpc DeleteSandbox(DeleteSandboxRequest) returns (Empty);
-  rpc GetSandbox(GetSandboxRequest) returns (SandboxInfo);
-}
-
-message CreateSandboxRequest {
-  string type = 1;
-  string image = 2;
-  Resources resources = 3;
-}
+# 停止
+docker-compose down
 ```
 
-### 9.2 gRPC 服务
+## 10. 发布流程
 
+### 10.1 版本号
+
+采用语义化版本 `vMAJOR.MINOR.PATCH`
+
+### 10.2 发布步骤
+
+```bash
+# 1. 更新版本
+# - 修改 apps/*/version
+# - 修改 libs/*/version
+
+# 2. 构建
+make build
+
+# 3. 测试
+make test
+
+# 4. Docker 构建并推送
+make docker
+
+# 5. Git 标签
+git tag v1.0.0
+git push origin v1.0.0
 ```
-Server (Node.js) ◄──gRPC──► Runner (Go)
-         │
-         │ HTTP API
-         ▼
-CLI/SDK (Node.js)
-```
 
-## 10. 文件命名约定
+## 11. 文件命名约定
 
-| 目录/文件 | 命名 | 示例 |
-|-----------|------|------|
+| 类型 | 规范 | 示例 |
+|------|------|------|
 | Go 源文件 | `snake_case.go` | `sandbox_handler.go` |
 | TypeScript 源文件 | `kebab-case.ts` | `sandbox-handler.ts` |
+| Python 源文件 | `snake_case.py` | `sandbox_handler.py` |
 | 测试文件 | `*_test.go` / `*.test.ts` | `sandbox_test.go` |
 | Protobuf | `snake_case.proto` | `runner.proto` |
-| 配置 | `kebab-case.yaml` | `buf.yaml` |
+| Docker | `Dockerfile.<service>` | `Dockerfile.agent` |
