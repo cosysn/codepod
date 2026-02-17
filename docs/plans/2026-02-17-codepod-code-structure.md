@@ -126,6 +126,23 @@ codepod/
 │   ├── build-all.sh
 │   └── generate-proto.sh
 │
+├── images/                         # 内置镜像
+│   ├── python/                     # Python 执行环境
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt
+│   │   └── .dockerignore
+│   ├── nodejs/                    # Node.js 执行环境
+│   │   ├── Dockerfile
+│   │   ├── package.json
+│   │   └── .dockerignore
+│   ├── go/                        # Go 执行环境
+│   │   ├── Dockerfile
+│   │   └── .dockerignore
+│   ├── base/                      # 基础镜像 (含 Agent)
+│   │   ├── Dockerfile
+│   │   └── agent/
+│   └── README.md                  # 镜像说明
+│
 ├── docs/                          # 文档
 │   └── plans/
 │
