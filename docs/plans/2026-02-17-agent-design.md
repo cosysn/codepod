@@ -258,7 +258,140 @@ ssh -R 8080:localhost:3000 user@sandbox
 ssh -D 1080 user@sandbox
 ```
 
-#### 2.2.6 Reporter (状态上报)
+#### 2.2.6 Idle Manager (空闲管理)
+
+```go
+// pkg/idle/manager.go
+
+type IdleManager struct {
+    config        *IdleConfig
+    lastActivity  time.Time
+    timer         *time.Timer
+    mu            sync.Mutex
+}
+
+type IdleConfig struct {
+    Enabled        bool          // 是否启用
+    Timeout       time.Duration // 空闲超时时间
+    CheckInterval time.Duration // 检查间隔
+    WarnBefore    time.Duration // 关闭前警告时间
+    AllowWakeup   bool          // 是否允许唤醒
+}
+
+// 活动类型
+type ActivityType int
+const (
+    ActivitySSH ActivityType = iota
+    ActivityExec
+    ActivityPortForward
+    ActivityAPI
+)
+```
+
+**功能：**
+- 监控用户活动 (SSH 连接、命令执行、端口转发)
+- 空闲超时自动休眠/关闭
+- 关闭前警告
+- 支持唤醒
+
+**工作流程：**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              空闲检测流程                                    │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  1. 活动检测                                            │
+│     ┌──────────────────────────────────────────────┐   │
+│     │  用户活动事件                                 │   │
+│     │  - SSH 连接建立/断开                         │   │
+│     │  - 命令执行                                  │   │
+│     │  - 端口转发建立/关闭                        │   │
+│     │  - API 调用                                 │   │
+│     └────────────────────┬───────────────────────┘   │
+│                          │                             │
+│                          ▼                             │
+│  2. 重置计时器                                          │
+│     lastActivity = now                               │
+│                                                         │
+│  3. 空闲检查 (每 CheckInterval)                          │
+│     ┌──────────────────────────────────────────────┐   │
+│     │  if now - lastActivity > Timeout:          │   │
+│     │       触发关闭流程                          │   │
+│     └──────────────────────────────────────────────┘   │
+│                                                         │
+│  4. 关闭流程                                            │
+│     ┌──────────────────────────────────────────────┐   │
+│     │  - 发送警告 (WarnBefore 前)                │   │
+│     │  - 通知 Server                             │   │
+│     │  - 等待现有连接关闭                        │   │
+│     │  - 关闭容器                                │   │
+│     └──────────────────────────────────────────────┘   │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**配置示例：**
+
+```yaml
+# /etc/codepod/agent.yaml
+idle:
+  enabled: true
+  timeout: 30m        # 30 分钟无活动关闭
+  check_interval: 30s  # 每 30 秒检查一次
+  warn_before: 2m      # 关闭前 2 分钟警告
+  allow_wakeup: true   # 允许唤醒
+```
+
+**唤醒机制：**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              唤醒机制                                       │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  1. 触发唤醒                                            │
+│     - 用户 SSH 连接尝试                                  │
+│     - Server 发送唤醒请求                               │
+│     - Webhook 触发                                     │
+│                                                         │
+│  2. 唤醒流程                                            │
+│     Agent ──gRPC──► Runner: 请求唤醒                    │
+│                 │                                        │
+│                 ▼                                        │
+│           Runner ──► 重新启动容器                        │
+│                                                         │
+│  3. 恢复状态                                            │
+│     - 恢复环境变量                                      │
+│     - 恢复网络配置                                      │
+│     - 通知用户                                          │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**事件追踪：**
+
+```go
+// 记录活动
+func (im *IdleManager) RecordActivity(t ActivityType) {
+    im.mu.Lock()
+    defer im.mu.Unlock()
+
+    im.lastActivity = time.Now()
+
+    // 通知 Server 更新状态
+    im.reportActivity(t)
+}
+
+// 忽略的活动 (内部操作)
+var ignoredActivities = []ActivityType{
+    ActivityHeartbeat,  // 心跳
+    ActivityStatusReport, // 状态上报
+    ActivitySelfCheck,    // 自身检查
+}
+```
+
+#### 2.2.7 Reporter (状态上报)
 
 ```go
 // pkg/reporter/reporter.go
@@ -329,8 +462,10 @@ Options:
   --server-url URL       Runner Server URL
   --token TOKEN          认证 Token
   --env ENV_FILE         环境变量文件 (default: /etc/codepod/env)
-  --log-level LEVEL      日志级别 (debug/info/warn/error)
-  --version              显示版本
+  --idle-timeout DUR    空闲超时时间 (default: 30m)
+  --idle-warn DUR       关闭前警告时间 (default: 2m)
+  --log-level LEVEL     日志级别 (debug/info/warn/error)
+  --version             显示版本
 ```
 
 ### 3.2 环境变量注入
@@ -634,6 +769,10 @@ apps/agent/
 │   │   ├── local.go
 │   │   ├── remote.go
 │   │   └── dynamic.go
+│   │
+│   ├── idle/                  # 空闲管理
+│   │   ├── manager.go
+│   │   └── events.go
 │   │
 │   ├── reporter/              # 状态上报
 │   │   ├── reporter.go
