@@ -563,7 +563,618 @@ Runner ──每 30 秒──► Server: Heartbeat
 | Runner 主动断开 | 标记为 offline |
 | Server 重启 | 重新连接并注册 |
 
-## 4. 接口设计
+## 4. Job 管理
+
+### 4.1 Job 超时处理
+
+```go
+type JobConfig struct {
+    Timeout       time.Duration  // Job 执行超时时间
+    TimeoutAction TimeoutAction // 超时后动作 (cancel, force_stop)
+}
+
+type TimeoutAction int
+const (
+    TimeoutCancel TimeoutAction = iota  // 取消 Job
+    TimeoutForceStop                   // 强制停止
+    TimeoutNotify                      // 通知 Server
+)
+
+// Job 超时处理流程
+func (js *JobScheduler) handleJobTimeout(job *Job) {
+    // 1. 停止当前 Job
+    js.stopJob(job)
+
+    // 2. 清理资源
+    js.cleanupJob(job)
+
+    // 3. 更新状态
+    job.Status = JobFailed
+    job.Error = ErrJobTimeout
+
+    // 4. 通知 Server
+    js.server.NotifyJobFailed(job.ID, ErrJobTimeout)
+}
+```
+
+### 4.2 Job 重试机制
+
+```go
+type RetryPolicy struct {
+    MaxRetries  int           // 最大重试次数
+    InitialDelay time.Duration // 初始延迟
+    MaxDelay    time.Duration // 最大延迟
+    Backoff     BackoffStrategy // 退避策略
+}
+
+type BackoffStrategy int
+const (
+    ExponentialBackoff BackoffStrategy = iota  // 指数退避
+    LinearBackoff                              // 线性退避
+    FixedBackoff                               // 固定延迟
+)
+
+// 重试示例
+retry := &RetryPolicy{
+    MaxRetries:  3,
+    InitialDelay: 1 * time.Second,
+    MaxDelay:    30 * time.Second,
+    Backoff:     ExponentialBackoff,
+}
+```
+
+### 4.3 Job 优先级
+
+```go
+type JobPriority int
+const (
+    PriorityLow JobPriority = iota
+    PriorityNormal
+    PriorityHigh
+    PriorityCritical
+)
+
+// 优先级队列
+type PriorityJobQueue struct {
+    queues map[JobPriority]*JobQueue
+}
+
+func (q *PriorityJobQueue) Enqueue(job *Job) {
+    q.queues[job.Priority].Enqueue(job)
+}
+
+func (q *PriorityJobQueue) Dequeue() *Job {
+    // 从高优先级到低优先级
+    for p := PriorityCritical; p >= PriorityLow; p-- {
+        if job := q.queues[p].Dequeue(); job != nil {
+            return job
+        }
+    }
+    return nil
+}
+```
+
+### 4.4 Job 并发控制
+
+```go
+type ConcurrencyConfig struct {
+    MaxConcurrentJobs    int           // 最大并发 Job 数
+    MaxConcurrentPerUser int          // 单用户最大并发
+    QueueSize         int           // 队列大小
+}
+
+func (js *JobScheduler) canAcceptJob(job *Job) bool {
+    // 检查全局并发
+    if js.runningJobs >= js.config.MaxConcurrentJobs {
+        return false
+    }
+
+    // 检查单用户并发
+    userJobs := js.getUserRunningJobs(job.Owner)
+    if userJobs >= js.config.MaxConcurrentPerUser {
+        return false
+    }
+
+    return true
+}
+```
+
+## 5. 资源管理
+
+### 5.1 资源配额
+
+```go
+type Quota struct {
+    MaxSandboxes    int   // 最大 Sandbox 数
+    MaxCPU         int64 // CPU 核心数
+    MaxMemory      int64 // 内存 (bytes)
+    MaxDisk        int64 // 磁盘 (bytes)
+    MaxSandboxAge  time.Duration // 最大运行时长
+}
+
+type UserQuota struct {
+    UserID string
+    Quota   Quota
+    Used    Quota
+}
+
+// 资源检查
+func (qm *QuotaManager) CheckQuota(userID string, req *CreateSandboxRequest) error {
+    quota := qm.GetUserQuota(userID)
+
+    if quota.Used.CPU+req.CPU > quota.MaxCPU {
+        return ErrCPUQuotaExceeded
+    }
+
+    if quota.Used.Memory+req.Memory > quota.MaxMemory {
+        return ErrMemoryQuotaExceeded
+    }
+
+    if quota.Used.Sandboxes+1 > quota.MaxSandboxes {
+        return ErrSandboxQuotaExceeded
+    }
+
+    return nil
+}
+```
+
+### 5.2 公平调度
+
+```go
+type FairScheduler struct {
+    userWeight map[string]float64
+}
+
+func (fs *FairScheduler) SelectJob() *Job {
+    // 计算每个用户的公平份额
+    // 选择使用资源最少的用户
+
+    users := fs.getActiveUsers()
+    for _, user := range users {
+        jobs := fs.getUserJobs(user)
+        if len(jobs) > 0 {
+            return fs.selectByWeight(jobs, fs.userWeight[user])
+        }
+    }
+    return nil
+}
+```
+
+### 5.3 资源清理
+
+```go
+func (js *JobScheduler) cleanupJob(job *Job) {
+    // 1. 停止容器
+    if job.ContainerID != "" {
+        js.docker.StopContainer(job.ContainerID)
+    }
+
+    // 2. 删除网络
+    if job.NetworkID != "" {
+        js.docker.RemoveNetwork(job.NetworkID)
+    }
+
+    // 3. 删除卷 (可选，保留数据)
+    if !job.KeepVolumes {
+        for _, vol := range job.Volumes {
+            js.docker.RemoveVolume(vol.Name)
+        }
+    }
+
+    // 4. 清理临时文件
+    js.cleanupTempFiles(job.ID)
+}
+```
+
+## 6. Sandbox 生命周期
+
+### 6.1 状态持久化
+
+```go
+type SandboxStore interface {
+    Save(sandbox *Sandbox) error
+    Get(id string) (*Sandbox, error)
+    Delete(id string) error
+    List() ([]*Sandbox, error)
+    UpdateStatus(id string, status SandboxStatus) error
+}
+
+// 持久化到 SQLite
+type SQLiteStore struct {
+    db *sql.DB
+}
+
+func (s *SandboxStore) Save(sandbox *Sandbox) error {
+    _, err := s.db.Exec(`
+        INSERT INTO sandboxes (id, name, status, container_id, ...)
+        VALUES (?, ?, ?, ...)`,
+        sandbox.ID, sandbox.Name, sandbox.Status, sandbox.ContainerID)
+    return err
+}
+```
+
+### 6.2 Sandbox 迁移
+
+```go
+type MigrationManager struct {
+    sourceRunner *RunnerInfo
+    targetRunner *RunnerInfo
+}
+
+func (mm *MigrationManager) MigrateSandbox(sandboxID string) error {
+    // 1. 暂停 Sandbox
+    mm.PauseSandbox(sandboxID)
+
+    // 2. 导出状态
+    state, err := mm.ExportState(sandboxID)
+    if err != nil {
+        return err
+    }
+
+    // 3. 在目标 Runner 创建新 Sandbox
+    newSandbox, err := mm.targetRunner.CreateFromState(state)
+    if err != nil {
+        return err
+    }
+
+    // 4. 更新 DNS 记录
+    mm.updateDNS(sandboxID, newSandbox)
+
+    // 5. 通知用户
+    mm.notifyUser(sandboxID, newSandbox)
+
+    // 6. 清理原 Sandbox
+    mm.sourceRunner.DeleteSandbox(sandboxID)
+
+    return nil
+}
+```
+
+### 6.3 健康检查
+
+```go
+type HealthChecker struct {
+    interval time.Duration
+    timeout  time.Duration
+}
+
+func (hc *HealthChecker) CheckSandbox(sandbox *Sandbox) error {
+    // 1. 检查容器状态
+    if sandbox.Status != Running {
+        return ErrSandboxNotRunning
+    }
+
+    // 2. 检查 Agent SSH
+    if !hc.checkSSH(sandbox.SSHPort) {
+        return ErrAgentNotResponding
+    }
+
+    // 3. 检查 Agent 心跳
+    if time.Since(sandbox.LastHeartbeat) > 2*time.Minute {
+        return ErrAgentHeartbeatTimeout
+    }
+
+    return nil
+}
+
+// 健康检查策略
+type HealthCheckPolicy struct {
+    Interval     time.Duration // 检查间隔
+    Timeout     time.Duration // 单次超时
+    UnhealthyThreshold int   // 不健康阈值
+    HealthyThreshold  int    // 健康阈值
+}
+```
+
+## 7. 网络管理
+
+### 7.1 网络访问控制
+
+```go
+type NetworkPolicy struct {
+    Ingress []IngressRule  // 入站规则
+    Egress  []EgressRule  // 出站规则
+}
+
+type IngressRule struct {
+    From   string // CIDR
+    Ports  []Port
+    Action Action // allow, deny
+}
+
+type EgressRule struct {
+    To     string // CIDR
+    Ports  []Port
+    Action Action
+}
+
+// 应用网络策略
+func (nm *NetworkManager) ApplyNetworkPolicy(podID string, policy *NetworkPolicy) error {
+    // 使用 Docker 网络策略或 iptables
+}
+```
+
+### 7.2 DNS 解析
+
+```go
+// Sandbox 内 DNS 配置
+type DNSConfig struct {
+    Nameservers []string // DNS 服务器
+    Search      []string // 搜索域
+    Options     []string // DNS 选项
+}
+
+// 自动配置 DNS
+func (nm *NetworkManager) ConfigureDNS(sandbox *Sandbox) error {
+    dnsConfig := &DNSConfig{
+        Nameservers: []string{"8.8.8.8", "8.8.4.4"},
+        Search:      []string{fmt.Sprintf("%s.codepod.local", sandbox.Workspace)},
+    }
+
+    return nm.docker.UpdateContainerDNS(sandbox.ContainerID, dnsConfig)
+}
+```
+
+### 7.3 反向隧道 (Runner 在 NAT 后)
+
+```go
+// 当 Runner 在 NAT/防火墙后时，需要反向隧道连接 Server
+type TunnelManager struct {
+    serverAddr string
+    tunnelConn net.Conn
+}
+
+// Runner 启动时建立反向隧道
+func (tm *TunnelManager) Connect() error {
+    conn, err := grpc.Dial(tm.serverAddr, grpc.WithTransportCredentials(mtlsCredentials))
+    if err != nil {
+        return err
+    }
+
+    // 建立反向隧道
+    stream, err := conn.OpenStream(context.Background())
+    if err != nil {
+        return err
+    }
+
+    tm.tunnelConn = stream
+    return nil
+}
+
+// Server 通过隧道推送 Job
+func (s *Server) PushJobViaTunnel(runnerID string, job *Job) error {
+    tunnel := s.tunnels[runnerID]
+    return tunnel.Send(job)
+}
+```
+
+## 8. 安全管理
+
+### 8.1 镜像安全扫描
+
+```go
+type ImageScanner interface {
+    Scan(image string) (*ScanResult, error)
+}
+
+type ScanResult struct {
+    Vulnerabilities []Vulnerability
+    OK            bool
+}
+
+type Vulnerability struct {
+    ID          string
+    Severity    string // critical, high, medium, low
+    Description string
+    FixVersion  string
+}
+
+// 扫描配置
+type ScanConfig struct {
+    Enabled     bool
+    SeverityCutoff string // 只扫描此级别以上的漏洞
+    AllowUntrusted bool  // 允许未信任镜像
+}
+```
+
+### 8.2 运行时安全
+
+```go
+type RuntimeSecurity struct {
+    FalcoEnabled bool
+    SeccompProfile string
+    AppArmorProfile string
+}
+
+// 集成 Falco
+type FalcoMonitor struct {
+    socketPath string
+}
+
+func (fm *FalcoMonitor) Start() error {
+    // 监控容器运行时行为
+    // 检测异常行为
+}
+
+// 安全事件处理
+func (fm *FalcoMonitor) HandleEvent(event *SecurityEvent) {
+    switch event.Severity {
+    case Critical:
+        fm.stopContainer(event.ContainerID)
+        fm.notifySecurityTeam(event)
+    case High:
+        fm.notifySecurityTeam(event)
+    }
+}
+```
+
+## 9. 故障处理
+
+### 9.1 Docker 故障
+
+```go
+type DockerFailureHandler struct {
+    docker *docker.Client
+}
+
+func (h *DockerFailureHandler) Handle(err error) error {
+    switch err.(type) {
+    case *docker DaemonError:
+        // Docker daemon 无响应
+        return h.handleDaemonCrash()
+    case *docker ImageNotFound:
+        // 镜像拉取失败
+        return h.handleImagePullFailure(err)
+    case *docker NetworkError:
+        // 网络错误
+        return h.handleNetworkError(err)
+    }
+    return err
+}
+
+func (h *DockerFailureHandler) handleDaemonCrash() error {
+    // 1. 等待 Docker 恢复
+    // 2. 重新连接
+    // 3. 恢复 Sandbox 状态
+}
+```
+
+### 9.2 Runner 故障
+
+```go
+type RunnerFailureHandler struct {
+    server *Server
+}
+
+func (h *RunnerFailureHandler) OnRunnerOffline(runnerID string) {
+    // 1. 标记 Runner 为 offline
+    h.server.MarkRunnerOffline(runnerID)
+
+    // 2. 获取该 Runner 上的 Sandbox
+    sandboxes := h.server.GetRunnerSandboxes(runnerID)
+
+    // 3. 重新调度 Sandbox
+    for _, sandbox := range sandboxes {
+        // 迁移到其他 Runner 或标记为需要恢复
+        h.server.MarkSandboxNeedsRecovery(sandbox.ID)
+    }
+}
+```
+
+### 9.3 灾难恢复
+
+```go
+type DisasterRecovery struct {
+    backupDir string
+}
+
+func (dr *DisasterRecovery) Backup() error {
+    // 1. 备份数据库
+    dr.backupDatabase()
+
+    // 2. 备份 Runner 状态
+    dr.backupRunnerState()
+
+    // 3. 备份 Sandbox 元数据
+    dr.backupSandboxMetadata()
+}
+
+func (dr *DisasterRecovery) Restore(backupID string) error {
+    // 1. 恢复数据库
+    dr.restoreDatabase(backupID)
+
+    // 2. 恢复 Runner 状态
+    dr.restoreRunnerState(backupID)
+
+    // 3. 重新连接 Runner
+    dr.reconnectRunners()
+
+    // 4. 恢复 Sandbox
+    dr.restoreSandboxes(backupID)
+}
+```
+
+## 10. 监控与可观测性
+
+### 10.1 Prometheus 指标
+
+```go
+var (
+    // Job 指标
+    jobDuration = prometheus.NewHistogramVec(
+        prometheus.HistogramOpts{
+            Name:    "codepod_job_duration_seconds",
+            Help:    "Job duration in seconds",
+            Buckets: []float64{1, 5, 10, 30, 60, 300},
+        },
+        []string{"type", "status"},
+    )
+
+    // Sandbox 指标
+    activeSandboxes = prometheus.NewGauge(
+        prometheus.GaugeOpts{
+            Name: "codepod_active_sandboxes_total",
+            Help: "Number of active sandboxes",
+        },
+    )
+
+    // Runner 资源指标
+    runnerCPUUsage = prometheus.NewGaugeVec(
+        prometheus.GaugeOpts{
+            Name: "codepod_runner_cpu_usage_percent",
+            Help: "CPU usage percentage",
+        },
+        []string{"runner_id"},
+    )
+)
+```
+
+### 10.2 链路追踪
+
+```go
+import "go.opentelemetry.io/otel"
+
+func (js *JobScheduler) ExecuteJob(job *Job) {
+    ctx, span := otel.Tracer("runner").Start(context.Background(), "ExecuteJob",
+        trace.WithAttributes(attribute.String("job.id", job.ID)))
+
+    defer span.End()
+
+    // 创建 Sandbox
+    sandbox, err := js.createSandbox(ctx, job)
+    if err != nil {
+        span.RecordError(err)
+        return
+    }
+
+    span.SetAttributes(attribute.String("sandbox.id", sandbox.ID))
+}
+```
+
+### 10.3 日志聚合
+
+```go
+type LogAggregator struct {
+    buffer *logrus.Logger
+    output io.Writer
+}
+
+func (la *LogAggregator) Start() {
+    // 1. 收集容器日志
+    // 2. 收集 Agent 日志
+    // 3. 聚合后发送到日志服务 (Elasticsearch, Loki)
+
+    go la.collectContainerLogs()
+    go la.collectAgentLogs()
+}
+
+func (la *LogAggregator) collectContainerLogs() {
+    logs, err := la.docker.ContainerLogs(context.Background(), containerID)
+    // 处理并发送
+}
+```
+
+## 12. 接口设计
 
 ### 3.1 命令行参数
 
@@ -639,7 +1250,7 @@ enum JobType {
 | `POST` | `/api/v1/agent/heartbeat` | Agent 心跳 |
 | `POST` | `/api/v1/agent/status` | Agent 状态上报 |
 
-## 5. 部署模式
+## 13. 部署模式
 
 ### 4.1 Docker 部署 (DinD)
 
@@ -723,7 +1334,7 @@ spec:
         averageValue: "10"
 ```
 
-## 6. 安全设计
+## 14. 安全设计
 
 ### 5.1 安全配置
 
@@ -755,7 +1366,7 @@ func GetNetworkOptions() *container.NetworkMode {
 }
 ```
 
-## 7. 目录结构
+## 15. 目录结构
 
 ```
 apps/runner/
@@ -808,7 +1419,7 @@ apps/runner/
 └── go.sum
 ```
 
-## 8. 配置示例
+## 16. 配置示例
 
 ```yaml
 # /etc/codepod/runner.yaml
@@ -844,7 +1455,7 @@ logging:
   format: json
 ```
 
-## 9. 依赖
+## 17. 依赖
 
 ```go
 // apps/runner/go.mod
