@@ -15,6 +15,7 @@ type ServerConfig struct {
 	HostKeys    []string
 	MaxSessions int
 	Token       string
+	IdleTimeout int
 }
 
 type SSHServer struct {
