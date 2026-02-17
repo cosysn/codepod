@@ -18,9 +18,10 @@ Server 是 CodePod 的控制平面核心组件，提供 RESTful API 供 CLI 和 
 - **运行时**：Node.js 20 LTS
 - **框架**：Express.js / Fastify
 - **数据库**：SQLite（默认）/ PostgreSQL（可选）
-- **缓存**：Redis（可选，会话、速率限制）
+- **缓存**：内存缓存（默认）/ Redis（可选，会话、速率限制）
 - **消息队列**：内存队列（默认）/ RabbitMQ / NATS（可选，异步任务）
-- **gRPC 客户端**：@grpc/grpc-js（与 Runner 通信）
+- **gRPC 服务端**：@grpc/grpc-js（接收 Runner 连接）
+- **安全**：Helmet、CORS、压缩
 
 ---
 
@@ -129,20 +130,52 @@ apps/server/
                           │
                           ▼
     ┌──────────────────────────────────────────────────────────┐
-    │                       Redis Cache                          │
-    │  - 会话缓存   - 速率限制   - 临时数据                      │
-    └──────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-    ┌──────────────────────────────────────────────────────────┐
-    │                    gRPC (双向流)                            │
-    │              Runner ↔ Server 通信通道                       │
-    └─────────────────────────┬─────────────────────────────────┘
+    │                    gRPC Server (Port 50051)               │
+    │              接收 Runner 连接 (反向隧道)                   │
+    │  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐ │
+    │  │ Runner Reg │ │ Job Receive │ │ Status Report       │ │
+    │  └─────────────┘ └─────────────┘ └─────────────────────┘ │
+    └─────────────────────────┬───────────────────────────────┘
                               │
                               ▼
                     ┌─────────────────────┐
-                    │     Runner Pool      │
+                    │     Runner Pool      │  (通过反向隧道连接)
                     └─────────────────────┘
+```
+
+### 2.3 Runner 连接架构
+
+由于 Runner 可能部署在 NAT 防火墙后面，**Server 作为 gRPC Server 监听端口，Runner 主动连接 Server**（反向隧道）：
+
+```
+                        ┌─────────────────────────┐
+                        │      防火墙/NAT          │
+                        └───────────┬─────────────┘
+                                    │
+         ┌──────────────────────────┼──────────────────────────┐
+         │                          │                          │
+         ▼                          ▼                          ▼
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Runner 1      │    │   Runner 2      │    │   Runner N      │
+│  (DinD/K8s)     │    │  (独立主机)      │    │  (云服务器)      │
+│                 │    │                 │    │                 │
+│  ┌───────────┐  │    │  ┌───────────┐  │    │  ┌───────────┐  │
+│  │ gRPC Cli │──┼────┼─▶│ gRPC Cli │──┼────┼─▶│ gRPC Cli │──┼──┐
+│  └───────────┘  │    │  └───────────┘  │    │  └───────────┘  │  │
+└─────────────────┘    └─────────────────┘    └─────────────────┘  │
+                                                                         │
+                        ┌─────────────────────────┐                    │
+                        │     Server (公网IP)      │◀──────────────────┘
+                        │  ┌───────────────────┐  │
+                        │  │ gRPC Server :50051│  │
+                        │  │ - Register        │  │
+                        │  │ - Heartbeat       │  │
+                        │  │ - ReportStatus    │  │
+                        │  └───────────────────┘  │
+                        │  ┌───────────────────┐  │
+                        │  │ REST API :3000    │  │
+                        │  └───────────────────┘  │
+                        └─────────────────────────┘
 ```
 
 ---
@@ -392,6 +425,46 @@ interface UpdateSandboxResponse {
 }
 ```
 
+#### 快照管理
+
+```typescript
+// POST /api/v1/sandboxes/:id/snapshots
+// 创建快照
+
+interface CreateSnapshotRequest {
+  name: string;              // 快照名称
+  description?: string;       // 描述
+  includeVolumes?: boolean;    // 是否包含数据卷（默认 true）
+}
+
+interface SnapshotResponse {
+  id: string;
+  sandboxId: string;
+  name: string;
+  description?: string;
+  size: string;
+  status: 'creating' | 'ready' | 'failed';
+  createdAt: string;
+}
+
+// GET /api/v1/sandboxes/:id/snapshots
+// 列出快照
+
+interface ListSnapshotsResponse {
+  snapshots: SnapshotResponse[];
+}
+
+// POST /api/v1/sandboxes/:id/snapshots/:snapshotId/restore
+// 恢复快照（会重启 Sandbox）
+
+interface RestoreSnapshotRequest {
+  force?: boolean;           // 强制恢复（即使有活跃连接）
+}
+
+// DELETE /api/v1/sandboxes/:id/snapshots/:snapshotId
+// 删除快照
+```
+
 ### 3.3 Runner 管理
 
 ```typescript
@@ -520,6 +593,181 @@ interface HealthResponse {
 
 // GET /health/detailed
 // 详细的健康检查（含指标）
+```
+
+### 3.7 镜像管理
+
+```typescript
+// GET /api/v1/images
+// 列出可用镜像
+
+interface ImageInfo {
+  name: string;
+  tag: string;
+  size: string;
+  description?: string;
+  defaultResources?: {
+    cpu: number;
+    memory: string;
+  };
+  labels?: string[];
+}
+
+interface ListImagesResponse {
+  images: ImageInfo[];
+  total: number;
+}
+
+// GET /api/v1/images/:name/tags
+// 列出镜像的可用标签
+
+interface ListImageTagsResponse {
+  name: string;
+  tags: string[];
+}
+```
+
+### 3.8 Sandbox 指标历史
+
+```typescript
+// GET /api/v1/sandboxes/:id/metrics
+// 获取 Sandbox 指标历史
+
+interface GetMetricsQuery {
+  startTime?: string;    // 开始时间
+  endTime?: string;      // 结束时间
+  interval?: string;     // 聚合间隔：1m, 5m, 1h, 1d
+  limit?: number;        // 最大数据点
+}
+
+interface MetricDataPoint {
+  timestamp: string;
+  cpuUsage: number;
+  memoryUsage: number;
+  diskUsage: string;
+  networkIn: number;
+  networkOut: number;
+}
+
+interface GetMetricsResponse {
+  sandboxId: string;
+  interval: string;
+  dataPoints: MetricDataPoint[];
+  summary: {
+    avgCpuUsage: number;
+    maxCpuUsage: number;
+    avgMemoryUsage: number;
+    maxMemoryUsage: number;
+  };
+}
+```
+
+### 3.9 系统配置管理
+
+```typescript
+// GET /api/v1/config
+// 获取系统配置
+
+interface SystemConfig {
+  sandbox: {
+    defaultTimeout: number;
+    maxTimeout: number;
+    defaultCpu: number;
+    defaultMemory: string;
+  };
+  quota: {
+    defaultMaxSandboxes: number;
+    defaultMaxCpu: number;
+    defaultMaxMemory: string;
+  };
+  runner: {
+    heartbeatInterval: number;
+    statusReportInterval: number;
+  };
+}
+
+// PATCH /api/v1/config
+// 更新系统配置（仅管理员）
+
+interface UpdateConfigRequest {
+  sandbox?: {
+    defaultTimeout?: number;
+    maxTimeout?: number;
+    defaultCpu?: number;
+    defaultMemory?: string;
+  };
+  quota?: {
+    defaultMaxSandboxes?: number;
+    defaultMaxCpu?: number;
+    defaultMaxMemory?: string;
+  };
+}
+```
+
+### 3.10 错误处理
+
+```typescript
+// 统一错误响应格式
+
+interface ErrorResponse {
+  error: string;
+  message: string;
+  code: string;
+  details?: Record<string, any>;
+  requestId?: string;
+  timestamp: string;
+}
+
+// 错误码定义
+
+enum ErrorCode {
+  // 认证错误 (4xx)
+  AUTH_REQUIRED = 'AUTH_REQUIRED',
+  AUTH_INVALID_KEY = 'AUTH_INVALID_KEY',
+  AUTH_EXPIRED_KEY = 'AUTH_EXPIRED_KEY',
+  AUTH_REVOKED_KEY = 'AUTH_REVOKED_KEY',
+
+  // 资源错误 (4xx)
+  RESOURCE_NOT_FOUND = 'RESOURCE_NOT_FOUND',
+  RESOURCE_EXISTS = 'RESOURCE_EXISTS',
+  RESOURCE_LIMIT_EXCEEDED = 'RESOURCE_LIMIT_EXCEEDED',
+
+  // 操作错误 (4xx)
+  OPERATION_INVALID = 'OPERATION_INVALID',
+  OPERATION_FORBIDDEN = 'OPERATION_FORBIDDEN',
+  OPERATION_CONFLICT = 'OPERATION_CONFLICT',
+
+  // 服务错误 (5xx)
+  INTERNAL_ERROR = 'INTERNAL_ERROR',
+  DATABASE_ERROR = 'DATABASE_ERROR',
+  GRPC_ERROR = 'GRPC_ERROR',
+  TIMEOUT_ERROR = 'TIMEOUT_ERROR',
+}
+
+// 错误中间件
+
+interface AppError extends Error {
+  code: ErrorCode;
+  statusCode: number;
+  details?: Record<string, any>;
+}
+
+function errorMiddleware(
+  err: AppError,
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  const requestId = (req as any).requestId;
+
+  res.status(err.statusCode || 500).json({
+    error: err.code,
+    message: err.message,
+    details: err.details,
+    requestId,
+    timestamp: new Date().toISOString(),
+  });
+}
 ```
 
 ---
@@ -749,27 +997,8 @@ export class SandboxService {
    * 选择 Runner
    */
   private async selectRunner(input: CreateSandboxRequest): Promise<any> {
-    // 获取可用的 Runner
-    const runners = await prisma.runner.findMany({
-      where: {
-        status: 'online',
-        capacity: {
-          available: { gt: 0 },
-        },
-      },
-      orderBy: {
-        sandboxes: {
-          _count: 'asc',  // 负载均衡
-        },
-      },
-      take: 1,
-    });
-
-    if (runners.length === 0) {
-      return null;
-    }
-
-    return runners[0];
+    const selector = new RunnerSelector();
+    return await selector.select(input);
   }
 
   /**
@@ -843,6 +1072,143 @@ export class SandboxService {
         ports: sandbox.exposedPorts || [],
       },
     };
+  }
+}
+```
+
+### 4.3 Runner 选择策略
+
+```typescript
+// src/services/runner-selector.ts
+
+import { prisma } from '../database/client';
+
+interface RunnerRequirements {
+  cpu?: number;
+  memory?: string;
+  disk?: string;
+  region?: string;
+  gpu?: boolean;
+  minAvailable?: number;
+}
+
+interface RunnerInfo {
+  id: string;
+  name: string;
+  status: string;
+  capacity: {
+    total: number;
+    available: number;
+    used: number;
+  };
+  resources: {
+    cpu: { total: number; used: number };
+    memory: { total: string; used: string };
+  };
+  region?: string;
+  metadata?: Record<string, string>;
+  lastHeartbeat: Date;
+  score: number;
+}
+
+export class RunnerSelector {
+  /**
+   * 选择 Runner
+   */
+  async select(requirements: RunnerRequirements): Promise<RunnerInfo | null> {
+    const candidates = await this.getCandidates(requirements);
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    // 按区域过滤
+    let filtered = candidates;
+    if (requirements.region) {
+      const regionMatch = candidates.filter(r => r.region === requirements.region);
+      if (regionMatch.length > 0) {
+        filtered = regionMatch;
+      }
+    }
+
+    // 计算得分
+    const scored = filtered.map(runner => ({
+      ...runner,
+      score: this.calculateScore(runner, requirements),
+    }));
+
+    scored.sort((a, b) => b.score - a.score);
+    return scored[0] || null;
+  }
+
+  private async getCandidates(requirements: RunnerRequirements): Promise<RunnerInfo[]> {
+    const runners = await prisma.runner.findMany({
+      where: { status: 'online' },
+      include: {
+        sandboxes: { where: { status: { in: ['pending', 'running'] } } },
+      },
+    });
+
+    return runners.map(runner => {
+      const capacity = JSON.parse(runner.capacity);
+      const resources = JSON.parse(runner.resources);
+      const metadata = runner.metadata ? JSON.parse(runner.metadata) : {};
+
+      return {
+        id: runner.id,
+        name: runner.name,
+        status: runner.status,
+        capacity: {
+          total: capacity.total || 10,
+          available: capacity.available || 5,
+          used: runner.sandboxes.length,
+        },
+        resources: {
+          cpu: { total: resources.cpu?.total || 16, used: resources.cpu?.used || 0 },
+          memory: { total: resources.memory?.total || '64Gi', used: resources.memory?.used || '0' },
+        },
+        region: runner.region,
+        metadata,
+        lastHeartbeat: runner.lastHeartbeat,
+        score: 0,
+      };
+    });
+  }
+
+  private calculateScore(runner: RunnerInfo, requirements: RunnerRequirements): number {
+    let score = 100;
+
+    const availableRatio = runner.capacity.available / runner.capacity.total;
+    score += availableRatio * 30;
+
+    const cpuAvailable = runner.resources.cpu.total - runner.resources.cpu.used;
+    const cpuRequired = requirements.cpu || 1;
+    if (cpuAvailable < cpuRequired) return -Infinity;
+    score += (cpuAvailable / runner.resources.cpu.total) * 20;
+
+    const memAvailable = this.parseMemory(runner.resources.memory.total) -
+                        this.parseMemory(runner.resources.memory.used);
+    const memRequired = this.parseMemory(requirements.memory || '512Mi');
+    if (memAvailable < memRequired) return -Infinity;
+    score += (memAvailable / this.parseMemory(runner.resources.memory.total)) * 20;
+
+    const loadRatio = runner.capacity.used / runner.capacity.total;
+    score -= loadRatio * 20;
+
+    const heartbeatAge = Date.now() - runner.lastHeartbeat.getTime();
+    const heartbeatScore = Math.max(0, 1 - heartbeatAge / 60000);
+    score += heartbeatScore * 10;
+
+    return score;
+  }
+
+  private parseMemory(mem: string): number {
+    const units: Record<string, number> = {
+      'Ki': 1024, 'Mi': 1024 ** 2, 'Gi': 1024 ** 3, 'Ti': 1024 ** 4,
+    };
+    for (const [unit, factor] of Object.entries(units)) {
+      if (mem.endsWith(unit)) return parseFloat(mem) * factor;
+    }
+    return parseFloat(mem);
   }
 }
 ```
@@ -991,7 +1357,247 @@ export class ApiKeyService {
 
 ## 5. Runner 通信
 
-### 5.1 gRPC 客户端
+### 5.1 gRPC Server（接收 Runner 连接）
+
+由于 Runner 可能部署在 NAT 后面，Server 需要作为 gRPC Server 监听，Runner 主动连接。
+
+```typescript
+// src/grpc/server.ts
+
+import * as grpc from '@grpc/grpc-js';
+import * as protoLoader from '@grpc/proto-loader';
+import path from 'path';
+import { RunnerService } from '../services/runner.service';
+import { SandboxService } from '../services/sandbox.service';
+import { EventBus } from '../events/event-bus';
+
+const RUNNER_PROTO_PATH = path.join(__dirname, '../../proto/runner/runner.proto');
+
+const packageDefinition = protoLoader.loadSync(RUNNER_PROTO_PATH, {
+  keepCase: true,  // 保持原始命名
+  longs: String,
+  enums: String,
+  defaults: true,
+  oneofs: true,
+});
+
+const runnerProto = grpc.loadPackageDefinition(packageDefinition).runner as any;
+
+export class GrpcServer {
+  private server: grpc.Server | null = null;
+  private runnerConnections: Map<string, any> = new Map();
+
+  constructor(private port: number = 50051) {}
+
+  /**
+   * 启动 gRPC Server
+   */
+  async start(): Promise<void> {
+    this.server = new grpc.Server({
+      'grpc.max_receive_message_length': 50 * 1024 * 1024,  // 50MB
+      'grpc.max_send_message_length': 50 * 1024 * 1024,
+    });
+
+    // 添加服务实现
+    this.server.addService(runnerProto.RunnerService.service, {
+      Register: this.handleRegister.bind(this),
+      Heartbeat: this.handleHeartbeat.bind(this),
+      ReportStatus: this.handleReportStatus.bind(this),
+      UploadLogs: this.handleUploadLogs.bind(this),
+    });
+
+    return new Promise((resolve, reject) => {
+      this.server!.bindAsync(
+        `0.0.0.0:${this.port}`,
+        grpc.ServerCredentials.createInsecure(),
+        (error, port) => {
+          if (error) {
+            reject(error);
+          } else {
+            console.log(`gRPC Server listening on port ${port}`);
+            resolve();
+          }
+        }
+      );
+    });
+  }
+
+  /**
+   * 处理 Runner 注册
+   */
+  private async handleRegister(
+    call: grpc.ServerUnaryCall<any, any>,
+    callback: grpc.sendUnaryData<any>
+  ): Promise<void> {
+    try {
+      const request = call.request;
+      const { runnerId, name, address, capacity, resources, region, metadata } = request;
+
+      // 验证注册信息
+      if (!runnerId || !name) {
+        callback({
+          code: grpc.status.INVALID_ARGUMENT,
+          message: 'Missing required fields: runnerId, name',
+        });
+        return;
+      }
+
+      // 保存连接
+      this.runnerConnections.set(runnerId, {
+        address,
+        lastHeartbeat: new Date(),
+        stream: null as any,
+      });
+
+      // 更新 Runner 状态
+      await RunnerService.updateRunner(runnerId, {
+        status: 'online',
+        address,
+        capacity,
+        resources,
+        region,
+        metadata,
+        lastHeartbeat: new Date(),
+      });
+
+      // 发送注册响应
+      callback(null, {
+        success: true,
+        serverVersion: '1.0.0',
+        config: {
+          heartbeatInterval: 30000,  // 30秒
+          statusReportInterval: 60000,  // 60秒
+          maxConcurrentJobs: capacity.available,
+        },
+      });
+
+      console.log(`Runner registered: ${name} (${runnerId})`);
+    } catch (error) {
+      console.error('Register error:', error);
+      callback({
+        code: grpc.status.INTERNAL,
+        message: 'Registration failed',
+      });
+    }
+  }
+
+  /**
+   * 处理心跳
+   */
+  private async handleHeartbeat(
+    call: grpc.ServerReadableStream<any, any>
+  ): Promise<void> {
+    const runnerId = call.request?.runnerId;
+
+    call.on('data', async (heartbeat) => {
+      this.runnerConnections.set(runnerId, {
+        ...this.runnerConnections.get(runnerId),
+        lastHeartbeat: new Date(),
+      });
+
+      await RunnerService.updateRunner(runnerId, {
+        status: 'online',
+        lastHeartbeat: new Date(),
+        resources: heartbeat.resources,
+      });
+    });
+
+    call.on('error', (error) => {
+      console.error(`Heartbeat error from ${runnerId}:`, error);
+      this.handleRunnerDisconnect(runnerId);
+    });
+
+    call.on('end', () => {
+      this.handleRunnerDisconnect(runnerId);
+    });
+  }
+
+  /**
+   * 处理状态上报
+   */
+  private async handleReportStatus(
+    call: grpc.ServerReadableStream<any, any>
+  ): Promise<void> {
+    const runnerId = call.request?.runnerId;
+
+    call.on('data', async (report) => {
+      const { sandboxId, status, metrics, error } = report;
+
+      // 更新 Sandbox 状态
+      await SandboxService.updateStatusFromRunner(runnerId, sandboxId, status, metrics);
+
+      // 发布事件
+      if (status === 'running') {
+        await EventBus.publish('sandbox.started', { sandboxId, runnerId });
+      } else if (status === 'failed') {
+        await EventBus.publish('sandbox.failed', { sandboxId, runnerId, error });
+      }
+    });
+
+    call.on('error', (error) => {
+      console.error(`Status report error from ${runnerId}:`, error);
+    });
+  }
+
+  /**
+   * 处理日志上传
+   */
+  private async handleUploadLogs(
+    call: grpc.ServerReadableStream<any, any>
+  ): Promise<void> {
+    const chunks: Buffer[] = [];
+
+    call.on('data', (chunk) => {
+      chunks.push(Buffer.from(chunk.data, 'base64'));
+    });
+
+    call.on('end', async () => {
+      const logData = Buffer.concat(chunks).toString();
+      console.log('Received logs:', logData.substring(0, 500));  // 只打印前500字符
+    });
+  }
+
+  /**
+   * 处理 Runner 断开连接
+   */
+  private async handleRunnerDisconnect(runnerId: string): Promise<void> {
+    this.runnerConnections.delete(runnerId);
+
+    await RunnerService.updateRunner(runnerId, {
+      status: 'offline',
+    });
+
+    console.log(`Runner disconnected: ${runnerId}`);
+  }
+
+  /**
+   * 停止 Server
+   */
+  async stop(): Promise<void> {
+    return new Promise((resolve) => {
+      if (this.server) {
+        this.server.tryShutdown(() => {
+          console.log('gRPC Server stopped');
+          resolve();
+        });
+      } else {
+        resolve();
+      }
+    });
+  }
+
+  /**
+   * 获取活跃连接数
+   */
+  getActiveConnections(): number {
+    return this.runnerConnections.size;
+  }
+}
+
+export const grpcServer = new GrpcServer();
+```
+
+### 5.2 gRPC 客户端（用于发送控制命令）
 
 ```typescript
 // src/grpc/client.ts
@@ -1003,7 +1609,7 @@ import path from 'path';
 const RUNNER_PROTO_PATH = path.join(__dirname, '../../proto/runner/runner.proto');
 
 const packageDefinition = protoLoader.loadSync(RUNNER_PROTO_PATH, {
-  keepCase: false,
+  keepCase: true,
   longs: String,
   enums: String,
   defaults: true,
@@ -1014,50 +1620,21 @@ const runnerProto = grpc.loadPackageDefinition(packageDefinition).runner as any;
 
 export class GrpcClient {
   private clients: Map<string, any> = new Map();
-  private connection: grpc.Client | null = null;
-
-  /**
-   * 连接到 Server gRPC 服务
-   */
-  async connect(serverAddress: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.connection = new runnerProto.RunnerService(
-        serverAddress,
-        grpc.credentials.createInsecure()
-      );
-
-      this.connection.on('error', (err) => {
-        console.error('gRPC connection error:', err);
-      });
-
-      this.connection.on('connect', () => {
-        console.log('Connected to gRPC server');
-        resolve();
-      });
-
-      this.connection.on('close', () => {
-        console.log('gRPC connection closed');
-      });
-    });
-  }
 
   /**
    * 提交 Job 到 Runner
    */
   async submitJob(params: {
-    jobId: string;
     runnerId: string;
+    jobId: string;
     type: string;
     payload: Record<string, any>;
     priority: number;
   }): Promise<any> {
-    return new Promise((resolve, reject) => {
-      if (!this.connection) {
-        reject(new Error('Not connected to gRPC server'));
-        return;
-      }
+    const client = await this.getClient(params.runnerId);
 
-      this.connection.SubmitJob(
+    return new Promise((resolve, reject) => {
+      client.SubmitJob(
         {
           jobId: params.jobId,
           runnerId: params.runnerId,
@@ -1066,36 +1643,8 @@ export class GrpcClient {
           priority: params.priority,
         },
         (error: any, response: any) => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve(response);
-          }
-        }
-      );
-    });
-  }
-
-  /**
-   * 获取 Sandbox 状态
-   */
-  async getSandboxStatus(runnerId: string, sandboxId: string): Promise<any> {
-    return new Promise((resolve, reject) => {
-      if (!this.connection) {
-        reject(new Error('Not connected to gRPC server'));
-        return;
-      }
-
-      const client = this.clients.get(runnerId) || this.connection;
-
-      client.GetSandboxStatus(
-        { sandboxId },
-        (error: any, response: any) => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve(response);
-          }
+          if (error) reject(error);
+          else resolve(response);
         }
       );
     });
@@ -1109,45 +1658,122 @@ export class GrpcClient {
     sandboxId: string,
     command: string
   ): Promise<void> {
+    const client = await this.getClient(runnerId);
+
     return new Promise((resolve, reject) => {
-      if (!this.connection) {
-        reject(new Error('Not connected to gRPC server'));
-        return;
-      }
-
-      const client = this.clients.get(runnerId) || this.connection;
-
-      client.SendControlCommand(
-        {
-          sandboxId,
-          command,
-        },
-        (error: any) => {
-          if (error) {
-            reject(error);
-          } else {
-            resolve();
-          }
-        }
-      );
+      client.SendControlCommand({ sandboxId, command }, (error: any) => {
+        if (error) reject(error);
+        else resolve();
+      });
     });
   }
 
-  /**
-   * 断开连接
-   */
-  async disconnect(): Promise<void> {
-    return new Promise((resolve) => {
-      if (this.connection) {
-        this.connection.close();
-        this.connection = null;
-      }
-      resolve();
+  private async getClient(runnerId: string): Promise<any> {
+    if (this.clients.has(runnerId)) {
+      return this.clients.get(runnerId);
+    }
+
+    // 从数据库获取 Runner 地址
+    const { prisma } = await import('../database/client');
+    const runner = await prisma.runner.findUnique({
+      where: { id: runnerId },
     });
+
+    if (!runner) {
+      throw new Error(`Runner not found: ${runnerId}`);
+    }
+
+    const client = new runnerProto.RunnerService(
+      runner.address,
+      grpc.credentials.createInsecure()
+    );
+
+    this.clients.set(runnerId, client);
+    return client;
   }
 }
 
 export const grpcClient = new GrpcClient();
+```
+
+### 5.3 Runner 服务
+
+```typescript
+// src/services/runner.service.ts
+
+import { prisma } from '../database/client';
+
+export class RunnerService {
+  /**
+   * 更新 Runner 信息
+   */
+  static async updateRunner(runnerId: string, data: {
+    status?: string;
+    address?: string;
+    capacity?: any;
+    resources?: any;
+    region?: string;
+    metadata?: any;
+    lastHeartbeat?: Date;
+  }): Promise<void> {
+    await prisma.runner.update({
+      where: { id: runnerId },
+      data: {
+        ...data,
+        updatedAt: new Date(),
+      },
+    });
+  }
+
+  /**
+   * 获取 Runner 列表
+   */
+  static async listRunners(filters?: {
+    status?: string;
+    region?: string;
+  }): Promise<any[]> {
+    return prisma.runner.findMany({
+      where: filters,
+      orderBy: { lastHeartbeat: 'desc' },
+    });
+  }
+
+  /**
+   * 获取 Runner 详情
+   */
+  static async getRunner(runnerId: string): Promise<any> {
+    return prisma.runner.findUnique({
+      where: { id: runnerId },
+      include: {
+        sandboxes: {
+          where: { status: { in: ['pending', 'running'] } },
+          take: 10,
+        },
+      },
+    });
+  }
+
+  /**
+   * 更新 Runner 容量
+   */
+  static async updateCapacity(runnerId: string, sandboxCount: number): Promise<void> {
+    const runner = await prisma.runner.findUnique({
+      where: { id: runnerId },
+    });
+
+    if (!runner) return;
+
+    const capacity = JSON.parse(runner.capacity);
+    const available = Math.max(0, capacity.total - sandboxCount);
+
+    await prisma.runner.update({
+      where: { id: runnerId },
+      data: {
+        capacity: JSON.stringify({ ...capacity, available }),
+      },
+    });
+  }
+}
 ```
 
 ---
@@ -1269,34 +1895,56 @@ export class SandboxEventHandler {
 
 ## 7. 异步任务处理
 
-### 7.1 Job Worker
+### 7.1 内存队列实现
 
 ```typescript
-// src/workers/job-worker.ts
+// src/workers/queue.ts
 
-import { EventBus } from '../events/event-bus';
+import { EventEmitter } from 'events';
 
-export class JobWorker {
+interface QueueJob {
+  id: string;
+  type: string;
+  payload: any;
+  priority: number;
+  retryCount: number;
+  maxRetries: number;
+  createdAt: Date;
+  scheduledAt?: Date;
+}
+
+type JobHandler = (job: QueueJob) => Promise<void>;
+
+export class JobQueue extends EventEmitter {
+  private queue: QueueJob[] = [];
+  private processing: Set<string> = new Set();
+  private handlers: Map<string, JobHandler> = new Map();
   private isRunning: boolean = false;
+  private workerCount: number;
   private workers: Worker[] = [];
 
-  constructor(private concurrency: number = 5) {}
+  constructor(workerCount: number = 5) {
+    super();
+    this.workerCount = workerCount;
+  }
 
   /**
-   * 启动 Worker
+   * 启动队列
    */
   async start(): Promise<void> {
     this.isRunning = true;
 
-    for (let i = 0; i < this.concurrency; i++) {
-      const worker = new Worker(`job-worker-${i}`);
+    for (let i = 0; i < this.workerCount; i++) {
+      const worker = new Worker(this, `queue-worker-${i}`);
       this.workers.push(worker);
       await worker.start();
     }
+
+    console.log(`JobQueue started with ${this.workerCount} workers`);
   }
 
   /**
-   * 停止 Worker
+   * 停止队列
    */
   async stop(): Promise<void> {
     this.isRunning = false;
@@ -1305,13 +1953,120 @@ export class JobWorker {
       await worker.stop();
     }
     this.workers = [];
+    this.processing.clear();
+
+    console.log('JobQueue stopped');
+  }
+
+  /**
+   * 注册处理器
+   */
+  registerHandler(type: string, handler: JobHandler): void {
+    this.handlers.set(type, handler);
+  }
+
+  /**
+   * 添加任务
+   */
+  async enqueue(type: string, payload: any, options: {
+    priority?: number;
+    maxRetries?: number;
+    delay?: number;
+  } = {}): Promise<string> {
+    const job: QueueJob = {
+      id: `job_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      type,
+      payload,
+      priority: options.priority ?? 0,
+      retryCount: 0,
+      maxRetries: options.maxRetries ?? 3,
+      createdAt: new Date(),
+      scheduledAt: options.delay ? new Date(Date.now() + options.delay) : undefined,
+    };
+
+    this.queue.push(job);
+    this.queue.sort((a, b) => {
+      // 优先处理有 scheduledAt 的
+      if (a.scheduledAt && !b.scheduledAt) return 1;
+      if (!a.scheduledAt && b.scheduledAt) return -1;
+      if (a.scheduledAt && b.scheduledAt) {
+        return a.scheduledAt.getTime() - b.scheduledAt.getTime();
+      }
+      // 按优先级降序
+      return b.priority - a.priority;
+    });
+
+    this.emit('enqueued', job);
+    return job.id;
+  }
+
+  /**
+   * 获取任务
+   */
+  async dequeue(): Promise<QueueJob | null> {
+    const now = new Date();
+
+    // 查找可执行的任务
+    const index = this.queue.findIndex(job =>
+      !this.processing.has(job.id) &&
+      (!job.scheduledAt || job.scheduledAt <= now)
+    );
+
+    if (index === -1) {
+      return null;
+    }
+
+    const [job] = this.queue.splice(index, 1);
+    this.processing.add(job.id);
+
+    return job;
+  }
+
+  /**
+   * 完成任务
+   */
+  async complete(job: QueueJob): Promise<void> {
+    this.processing.delete(job.id);
+    this.emit('completed', job);
+  }
+
+  /**
+   * 失败任务重试
+   */
+  async fail(job: QueueJob, error: Error): Promise<void> {
+    this.processing.delete(job.id);
+
+    if (job.retryCount < job.maxRetries) {
+      job.retryCount++;
+      // 指数退避
+      const delay = Math.pow(2, job.retryCount) * 1000;
+      job.scheduledAt = new Date(Date.now() + delay);
+      this.queue.push(job);
+      this.emit('retried', job, error);
+    } else {
+      this.emit('failed', job, error);
+    }
+  }
+
+  /**
+   * 获取队列状态
+   */
+  getStatus(): { queued: number; processing: number; workers: number } {
+    return {
+      queued: this.queue.length,
+      processing: this.processing.size,
+      workers: this.workers.length,
+    };
   }
 }
 
 class Worker {
   private isProcessing: boolean = false;
 
-  constructor(private name: string) {}
+  constructor(
+    private queue: JobQueue,
+    private name: string
+  ) {}
 
   async start(): Promise<void> {
     this.isProcessing = true;
@@ -1325,54 +2080,183 @@ class Worker {
   private async processLoop(): Promise<void> {
     while (this.isProcessing) {
       try {
-        // 从队列获取任务
-        const job = await this.getJobFromQueue();
+        const job = await this.queue.dequeue();
         if (job) {
           await this.processJob(job);
         } else {
-          // 空闲等待
-          await this.sleep(1000);
+          await this.sleep(1000);  // 空闲等待
         }
       } catch (error) {
-        console.error(`[${this.name}] Error processing job:`, error);
+        console.error(`[${this.name}] Error:`, error);
         await this.sleep(5000);
       }
     }
   }
 
-  private async getJobFromQueue(): Promise<any> {
-    // 从 RabbitMQ/NATS 获取任务
-    return null;  // TODO: 实现
-  }
+  private async processJob(job: QueueJob): Promise<void> {
+    console.log(`[${this.name}] Processing job: ${job.id} (${job.type})`);
 
-  private async processJob(job: any): Promise<void> {
-    console.log(`[${this.name}] Processing job: ${job.id}`);
+    try {
+      const handler = this.queue['handlers'].get(job.type);
+      if (!handler) {
+        throw new Error(`No handler for job type: ${job.type}`);
+      }
 
-    switch (job.type) {
-      case 'DELETE_ARCHIVED':
-        await this.handleDeleteArchived(job);
-        break;
-      case 'CLEANUP_ORPHANS':
-        await this.handleCleanupOrphans(job);
-        break;
-      default:
-        console.warn(`[${this.name}] Unknown job type: ${job.type}`);
+      await handler(job);
+      await this.queue.complete(job);
+
+      console.log(`[${this.name}] Job completed: ${job.id}`);
+    } catch (error) {
+      console.error(`[${this.name}] Job failed: ${job.id}`, error);
+      await this.queue.fail(job, error as Error);
     }
-  }
-
-  private async handleDeleteArchived(job: any): Promise<void> {
-    const { sandboxId } = job.payload;
-    // 清理已归档的 sandbox
-  }
-
-  private async handleCleanupOrphans(job: any): Promise<void> {
-    // 清理孤立资源
   }
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }
+
+// 全局队列实例
+export const jobQueue = new JobQueue(5);
+```
+
+### 7.2 预注册任务处理器
+
+```typescript
+// src/workers/handlers.ts
+
+import { jobQueue } from './queue';
+import { prisma } from '../database/client';
+import { SandboxService } from '../services/sandbox.service';
+
+// 注册 Sandbox 清理任务
+jobQueue.registerHandler('DELETE_ARCHIVED', async (job) => {
+  const { sandboxId, gracePeriod } = job.payload;
+
+  // 再次检查是否还在使用
+  const sandbox = await prisma.sandbox.findUnique({
+    where: { id: sandboxId },
+  });
+
+  if (!sandbox || sandbox.status === 'deleted') {
+    return;  // 已经被删除
+  }
+
+  await SandboxService.forceDeleteSandbox(sandboxId);
+  console.log(`Archived sandbox deleted: ${sandboxId}`);
+});
+
+// 注册孤立资源清理任务
+jobQueue.registerHandler('CLEANUP_ORPHANS', async (job) => {
+  // 查找状态异常超过阈值的 Sandbox
+  const orphaned = await prisma.sandbox.findMany({
+    where: {
+      status: { in: ['pending', 'running'] },
+      updatedAt: {
+        lt: new Date(Date.now() - 30 * 60 * 1000),  // 30分钟未更新
+      },
+    },
+  });
+
+  for (const sandbox of orphaned) {
+    try {
+      // 尝试从 Runner 获取真实状态
+      if (sandbox.runnerId) {
+        // TODO: 通过 gRPC 获取真实状态
+      }
+
+      // 如果无法确认，标记为可疑
+      await pr({
+        where:isma.sandbox.update { id: sandbox.id },
+        data: { status: 'suspected_orphaned' },
+      });
+    } catch (error) {
+      console.error(`Cleanup error for ${sandbox.id}:`, error);
+    }
+  }
+});
+
+// 注册指标收集任务
+jobQueue.registerHandler('COLLECT_METRICS', async (job) => {
+  const { sandboxId } = job.payload;
+
+  const sandbox = await prisma.sandbox.findUnique({
+    where: { id: sandboxId },
+  });
+
+  if (!sandbox || sandbox.status !== 'running') {
+    return;
+  }
+
+  // 从 Runner 获取指标
+  try {
+    const metrics = await SandboxService.getSandboxMetrics(sandbox.runnerId, sandboxId);
+
+    // 存储到历史记录
+    await prisma.metricHistory.create({
+      data: {
+        sandboxId,
+        cpuUsage: metrics.cpuUsage,
+        memoryUsage: metrics.memoryUsage,
+        diskUsage: metrics.diskUsage,
+        networkIn: metrics.networkIn,
+        networkOut: metrics.networkOut,
+      },
+    });
+
+    // 更新当前指标
+    await prisma.sandbox.update({
+      where: { id: sandboxId },
+      data: { metrics: JSON.stringify(metrics) },
+    });
+  } catch (error) {
+    console.error(`Failed to collect metrics for ${sandboxId}:`, error);
+  }
+});
+
+// 启动队列
+export async function startJobQueue(): Promise<void> {
+  await jobQueue.start();
+
+  // 定时清理归档的 Sandbox
+  setInterval(async () => {
+    const archived = await prisma.sandbox.findMany({
+      where: {
+        status: 'archived',
+        archivedAt: { lt: new Date() },
+      },
+      take: 100,
+    });
+
+    for (const sandbox of archived) {
+      await jobQueue.enqueue('DELETE_ARCHIVED', {
+        sandboxId: sandbox.id,
+        gracePeriod: 0,
+      });
+    }
+  }, 60000);  // 每分钟检查一次
+}
+```
+
+### 7.3 任务调度示例
+
+```typescript
+// 安排延迟删除
+await jobQueue.enqueue('DELETE_ARCHIVED', {
+  sandboxId: 'xxx',
+  gracePeriod: 3600,
+}, {
+  priority: 10,  // 高优先级
+});
+
+// 安排指标收集
+await jobQueue.enqueue('COLLECT_METRICS', {
+  sandboxId: 'xxx',
+}, {
+  priority: -10,  // 低优先级
+  delay: 300000,  // 5秒后执行
+});
 ```
 
 ---
@@ -1398,7 +2282,30 @@ DATABASE_URL="postgresql://user:pass@localhost:5432/codepod"
 | 适用场景 | 开发/单机部署 | 生产/分布式部署 |
 | 备份 | 复制文件即可 | pg_dump |
 
-### 8.2 Prisma Schema
+### 8.2 用户模型
+
+```prisma
+// User 用户模型
+model User {
+  id          String    @id @default(uuid())
+  email       String    @unique
+  name        String
+  role        String    @default("user")  // user, admin
+  status      String    @default("active")  // active, disabled
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  apiKeys     ApiKey[]
+  sandboxes   Sandbox[]
+  quotas      Quota?
+  webhooks    Webhook[]
+  auditLogs   AuditLog[]
+
+  @@index([email])
+}
+```
+
+### 8.3 Prisma Schema（完整）
 
 ```prisma
 // prisma/schema.prisma
@@ -1412,18 +2319,39 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// 用户
+model User {
+  id          String    @id @default(uuid())
+  email       String    @unique
+  name        String
+  role        String    @default("user")
+  status      String    @default("active")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  apiKeys     ApiKey[]
+  sandboxes   Sandbox[]
+  quotas      Quota?
+  webhooks    Webhook[]
+  auditLogs   AuditLog[]
+
+  @@index([email])
+}
+
 // 用户 API Keys
 model ApiKey {
   id          String    @id @default(uuid())
   keyHash     String    @unique
   name        String
   userId      String
-  permissions String    @default("[]")  // SQLite 用 JSON 字符串存储
+  permissions String    @default("[]")
   status      String    @default("active")
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   lastUsedAt  DateTime?
   expiresAt   DateTime?
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
@@ -1438,48 +2366,93 @@ model Sandbox {
   image         String
   imageVersion  String    @default("latest")
   status        String    @default("pending")
-  resources     String    @default("{}")  // JSON 字符串
-  env           String?   // JSON 字符串
+  resources     String    @default("{}")
+  env           String?
   sshToken      String?
   timeout       Int       @default(3600)
-  annotations   String?   // JSON 字符串
-  exposedPorts  String    @default("[]") // JSON 字符串
-  metrics       String?   // JSON 字符串
+  annotations   String?
+  exposedPorts  String    @default("[]")
+  metrics       String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   startedAt     DateTime?
   stoppedAt     DateTime?
   archivedAt    DateTime?
+  deletedAt     DateTime?
+
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  snapshots     Snapshot[]
+  metricsHistory MetricHistory[]
 
   @@index([userId])
   @@index([runnerId])
   @@index([status])
 }
 
+// 快照
+model Snapshot {
+  id           String    @id @default(uuid())
+  sandboxId    String
+  name         String
+  description  String?
+  size         String    @default("0")
+  status       String    @default("creating")  // creating, ready, failed
+  backupPath   String?
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
+
+  sandbox      Sandbox   @relation(fields: [sandboxId], references: [id], onDelete: Cascade)
+
+  @@index([sandboxId])
+}
+
+// 指标历史
+model MetricHistory {
+  id          String    @id @default(uuid())
+  sandboxId   String
+  cpuUsage    Float?
+  memoryUsage Float?
+  diskUsage   String?
+  networkIn   Int?
+  networkOut  Int?
+  collectedAt DateTime  @default(now())
+
+  sandbox     Sandbox   @relation(fields: [sandboxId], references: [id], onDelete: Cascade)
+
+  @@index([sandboxId])
+  @@index([collectedAt])
+}
+
 // Runner 注册表
 model Runner {
-  id          String    @id @default(uuid())
-  name        String
-  address     String    @unique
-  status      String    @default("offline")
-  capacity    String    @default("{}")  // JSON 字符串
-  resources   String    @default("{}")  // JSON 字符串
-  region      String?
-  metadata    String?   // JSON 字符串
-  lastHeartbeat DateTime @default(now())
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  id           String    @id @default(uuid())
+  name         String
+  address      String    @unique
+  status       String    @default("offline")
+  capacity     String    @default("{}")
+  resources    String    @default("{}")
+  region       String?
+  metadata     String?
+  lastHeartbeat DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sandboxes    Sandbox[]
 
   @@index([status])
+  @@index([region])
 }
 
 // 用户配额
 model Quota {
   userId        String   @id
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   maxSandboxes  Int      @default(10)
   maxCpu        Int      @default(100)
   maxMemory     String   @default("100Gi")
   maxDisk       String   @default("1Ti")
+  maxSnapshots  Int      @default(50)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 }
@@ -1490,13 +2463,17 @@ model Webhook {
   name        String
   url         String
   secret      String?
-  events      String    @default("[]")  // JSON 字符串
+  events      String    @default("[]")
   status      String    @default("active")
   sandboxId   String?
+  userId      String
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([sandboxId])
+  @@index([userId])
 }
 
 // Webhook 发送记录
@@ -1504,7 +2481,7 @@ model WebhookLog {
   id          String   @id @default(uuid())
   webhookId   String
   event       String
-  payload     String   // JSON 字符串
+  payload     String
   statusCode  Int?
   response    String?
   error       String?
@@ -1523,16 +2500,25 @@ model AuditLog {
   resourceType String
   resourceId   String
   status       String
-  details      String?  // JSON 字符串
+  details      String?
   ipAddress    String
   userAgent    String
   createdAt    DateTime @default(now())
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([resourceType])
   @@index([createdAt])
 }
-```
+
+// 系统配置
+model Config {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+}
 
 ### 8.3 数据库客户端封装
 
@@ -1757,6 +2743,106 @@ WEBHOOK_TIMEOUT=30000
 # 速率限制
 RATE_LIMIT_WINDOW=60000
 RATE_LIMIT_MAX=100
+```
+
+### 9.4 日志持久化
+
+```typescript
+// src/utils/logger.ts
+
+import winston from 'winston';
+import path from 'path';
+
+const LOG_DIR = process.env.LOG_DIR || './logs';
+
+const logFormat = winston.format.combine(
+  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  winston.format.errors({ stack: true }),
+  winston.format.printf(({ timestamp, level, message, ...meta }) => {
+    const metaStr = Object.keys(meta).length ? JSON.stringify(meta) : '';
+    return `${timestamp} [${level.toUpperCase()}]: ${message} ${metaStr}`;
+  })
+);
+
+export const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: logFormat,
+  transports: [
+    // 控制台输出
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.colorize(),
+        logFormat
+      ),
+    }),
+
+    // 文件输出 - 错误日志
+    new winston.transports.File({
+      filename: path.join(LOG_DIR, 'error.log'),
+      level: 'error',
+      maxsize: 10 * 1024 * 1024,  // 10MB
+      maxFiles: 5,
+    }),
+
+    // 文件输出 - 所有日志
+    new winston.transports.File({
+      filename: path.join(LOG_DIR, 'combined.log'),
+      maxsize: 10 * 1024 * 1024,
+      maxFiles: 10,
+    }),
+
+    // 文件输出 - 访问日志
+    new winston.transports.File({
+      filename: path.join(LOG_DIR, 'access.log'),
+      maxsize: 10 * 1024 * 1024,
+      maxFiles: 10,
+    }),
+  ],
+});
+
+// 访问日志中间件
+export function accessLogger(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  const start = Date.now();
+
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logger.info('HTTP Access', {
+      method: req.method,
+      url: req.url,
+      status: res.statusCode,
+      duration: `${duration}ms`,
+      userAgent: req.get('user-agent'),
+      ip: req.ip,
+    });
+  });
+
+  next();
+}
+```
+
+### 9.5 日志轮转配置
+
+```bash
+# logrotate 配置
+# /etc/logrotate.d/codepod
+
+/var/log/codepod/*.log {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 0640 www-data www-data
+    sharedscripts
+    postrotate
+        systemctl reload codepod-server > /dev/null 2>&1 || true
+    endscript
+}
 ```
 
 ---
