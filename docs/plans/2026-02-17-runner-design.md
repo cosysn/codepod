@@ -410,7 +410,160 @@ type JobQueueStatus struct {
 }
 ```
 
-## 3. 接口设计
+## 3. Runner 注册与识别
+
+### 3.1 注册流程
+
+```
+┌─────────────────────────────────────────────────────────┐
+│           Runner 注册流程                                    │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  1. Runner 启动配置                                     │
+│     - runner_id: "runner-001"                         │
+│     - server_url: "grpc://server:8080"              │
+│     - token: "runner_token_xxx"                      │
+│     - resources: { cpu, memory, disk }                │
+│                                                         │
+│  2. 建立 gRPC 连接 (mTLS 双向认证)                    │
+│                                                         │
+│  3. 发送注册请求                                      │
+│     Runner ──► Server: Register(RegisterRequest)       │
+│                                                         │
+│     RegisterRequest:                                   │
+│     {                                                 │
+│       runner_id: "runner-001",                        │
+│       version: "1.0.0",                              │
+│       resources: {                                     │
+│         cpu: 4,                                       │
+│         memory: "8Gi",                                │
+│         disk: "100Gi"                                │
+│       },                                              │
+│       labels: {                                       │
+│         region: "us-east-1",                         │
+│         zone: "zone-a"                                │
+│       }                                               │
+│     }                                                 │
+│                                                         │
+│  4. Server 验证并记录                                  │
+│     - 验证 token                                      │
+│     - 分配 Runner ID                                  │
+│     - 注册到 Runner 列表                               │
+│                                                         │
+│  5. 返回注册结果                                      │
+│     Server ──► Runner: RegisterResponse                │
+│                                                         │
+│     RegisterResponse:                                  │
+│     {                                                 │
+│       success: true,                                  │
+│       server_version: "1.0.0",                       │
+│       agent_version: "1.0.0"                         │
+│     }                                                 │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 3.2 Runner 识别机制
+
+```go
+// Server 端 Runner 注册表
+type RunnerRegistry struct {
+    mu       sync.RWMutex
+    runners  map[string]*RunnerInfo
+}
+
+type RunnerInfo struct {
+    ID          string            // 唯一标识
+    Address     string            // gRPC 地址
+    Status      RunnerStatus      // ready, busy, offline
+    Resources   Resources         // CPU、内存、磁盘
+    Labels      map[string]string // 标签 (region, zone 等)
+    RegisteredAt time.Time
+    LastHeartbeat time.Time
+    Version     string
+    SandboxCount int              // 当前 Sandbox 数量
+}
+```
+
+### 3.3 Runner 选择算法
+
+```go
+// Server 选择合适的 Runner
+func (s *Server) SelectRunner(req *CreateSandboxRequest) (*RunnerInfo, error) {
+    // 1. 过滤满足资源要求的 Runner
+    candidates := filterRunners(s.registry, func(r *RunnerInfo) bool {
+        return r.Status == RunnerReady &&
+               r.Resources.Memory >= req.Resources.Memory &&
+               r.Resources.CPU >= req.Resources.CPU
+    })
+
+    // 2. 根据标签选择 (可选)
+    if req.Labels != nil {
+        candidates = filterByLabels(candidates, req.Labels)
+    }
+
+    // 3. 选择负载最低的 Runner (Least Connections)
+    sort.Slice(candidates, func(i, j int) bool {
+        return candidates[i].SandboxCount < candidates[j].SandboxCount
+    })
+
+    if len(candidates) == 0 {
+        return nil, ErrNoAvailableRunner
+    }
+
+    return candidates[0], nil
+}
+```
+
+### 3.4 心跳保活
+
+```protobuf
+// gRPC 心跳接口
+service RunnerService {
+    rpc Heartbeat(stream HeartbeatRequest) returns (stream HeartbeatResponse);
+}
+
+message HeartbeatRequest {
+    string runner_id = 1;
+    RunnerStatus status = 2;  // ready, busy
+    Resources current_load = 3;
+    int32 sandbox_count = 4;
+}
+
+message HeartbeatResponse {
+    Command command = 1;  // update_agent, shutdown
+}
+```
+
+**心跳流程：**
+```
+Runner ──每 30 秒──► Server: Heartbeat
+                              │
+                              ▼
+                      更新最后活跃时间
+                      更新资源使用情况
+                              │
+                              ▼
+                      Runner ──返回──► HeartbeatResponse
+```
+
+### 3.5 Runner 状态管理
+
+| 状态 | 描述 |
+|------|------|
+| **Ready** | 正常，可接收任务 |
+| **Busy** | 忙碌中，可接收任务 |
+| **Offline** | 离线，不分配任务 |
+
+### 3.6 下线处理
+
+| 场景 | 处理 |
+|------|------|
+| 心跳超时 (超过 2 分钟) | 标记为 offline，停止分配新任务 |
+| Runner 主动断开 | 标记为 offline |
+| Server 重启 | 重新连接并注册 |
+
+## 4. 接口设计
 
 ### 3.1 命令行参数
 
@@ -486,7 +639,7 @@ enum JobType {
 | `POST` | `/api/v1/agent/heartbeat` | Agent 心跳 |
 | `POST` | `/api/v1/agent/status` | Agent 状态上报 |
 
-## 4. 部署模式
+## 5. 部署模式
 
 ### 4.1 Docker 部署 (DinD)
 
@@ -570,7 +723,7 @@ spec:
         averageValue: "10"
 ```
 
-## 5. 安全设计
+## 6. 安全设计
 
 ### 5.1 安全配置
 
@@ -602,7 +755,7 @@ func GetNetworkOptions() *container.NetworkMode {
 }
 ```
 
-## 6. 目录结构
+## 7. 目录结构
 
 ```
 apps/runner/
@@ -655,7 +808,7 @@ apps/runner/
 └── go.sum
 ```
 
-## 7. 配置示例
+## 8. 配置示例
 
 ```yaml
 # /etc/codepod/runner.yaml
@@ -691,7 +844,7 @@ logging:
   format: json
 ```
 
-## 8. 依赖
+## 9. 依赖
 
 ```go
 // apps/runner/go.mod
