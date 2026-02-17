@@ -1,0 +1,21 @@
+# Runner Configuration
+
+# Server Connection
+server:
+  url: "localhost:50051"
+  token: "${RUNNER_TOKEN}"
+
+# Docker Configuration
+docker:
+  host: "unix:///var/run/docker.sock"
+  network: "codepod"
+
+# Runner Settings
+runner:
+  id: "runner-001"
+  max_jobs: 10
+
+# Logging
+logging:
+  level: "info"
+  format: "json"

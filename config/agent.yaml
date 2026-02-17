@@ -1,0 +1,31 @@
+# Agent Configuration
+
+# Runner Connection
+server:
+  url: "http://localhost:8080"
+  token: "${AGENT_TOKEN}"
+
+# SSH Settings
+ssh:
+  port: 22
+  host_keys:
+    - "/etc/ssh/ssh_host_rsa_key"
+    - "/etc/ssh/ssh_host_ed25519_key"
+  max_sessions: 10
+  banner: "Welcome to CodePod Sandbox"
+
+# Sandbox Settings
+sandbox:
+  id: "${SANDBOX_ID}"
+  workspace: "/workspace"
+
+# Idle Management
+idle:
+  enabled: true
+  timeout: "30m"
+  warn_before: "2m"
+
+# Logging
+logging:
+  level: "info"
+  format: "json"
