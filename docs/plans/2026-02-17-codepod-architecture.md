@@ -176,7 +176,7 @@
 
 **Server 连接配置:**
 
-CLI/SDK 与 Server 部署在不同机器上，连接配置如下：
+CLI/SDK 与 Server 部署在不同机器上，通过 HTTP 进行通信：
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -200,24 +200,127 @@ CLI/SDK 与 Server 部署在不同机器上，连接配置如下：
 │  │  # endpoint: https://codepod.example.com      │   │
 │  │  # api_key: cp_live_xxxx                      │   │
 │  └─────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+**HTTP API 通信:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              HTTP API 通信                                │
+├─────────────────────────────────────────────────────────┤
 │                                                         │
 │  ┌─────────────────────────────────────────────────┐   │
-│  │              连接流程                             │   │
+│  │              Sandbox 管理操作                       │   │
 │  │                                                  │   │
-│  │  CLI/SDK ──► Server: 连接验证                  │   │
-│  │     │            │                              │   │
-│  │     │            ▼                              │   │
-│  │     │       验证 API Key                       │   │
-│  │     │            │                              │   │
-│  │     │            ▼                              │   │
-│  │     │       返回: Sandbox 访问信息              │   │
-│  │     │            │                              │   │
-│  │     ▼            │                              │   │
-│  │  使用 Sandbox  │                              │   │
-│  │                                                         │
+│  │  CLI/SDK ──HTTP POST──► Server                  │   │
+│  │     │                                              │   │
+│  │     │  POST /api/v1/sandboxes                  │   │
+│  │     │  { type, image, resources, ... }         │   │
+│  │     │                                              │   │
+│  │     ◄──HTTP 201 Created──                       │   │
+│  │          { id, ssh: { host, port, user }, ... }│   │
+│  │                                                  │   │
+│  │  CLI/SDK ──HTTP DELETE──► Server               │   │
+│  │     │                                              │   │
+│  │     │  DELETE /api/v1/sandboxes/:id           │   │
+│  │     │                                              │   │
+│  │     ◄──HTTP 204 No Content──                   │   │
+│  │                                                  │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │              SSH 连接流程                          │   │
+│  │                                                  │   │
+│  │  1. 查询 Sandbox 信息并获取 SSH Token            │   │
+│  │     CLI ──HTTP GET──► Server                   │   │
+│  │        │                                        │   │
+│  │        │  GET /api/v1/sandboxes/:id/ssh       │   │
+│  │        │                                        │   │
+│  │        ◄──HTTP 200 OK──                       │   │
+│  │            { host, port, user, token }        │   │
+│  │                                                  │   │
+│  │  2. 使用 Token 进行 SSH 连接                    │   │
+│  │     CLI ──SSH──► Agent                        │   │
+│  │        │   -o "PasswordAuthentication=no"     │   │
+│  │        │   -o "PreferredAuthentications=password"│   │
+│  │        │   root@host:port (password = token)  │   │
+│  │        │                                        │   │
+│  │        ◄──SSH Session──                        │   │
+│  │                                                  │   │
 │  └─────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────┘
 ```
+
+**SSH 连接详细流程:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              SSH 连接流程 (Token 认证)                    │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  步骤 1: 获取 SSH Token                                │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │                                                  │   │
+│  │  $ codepod ssh abc123                          │   │
+│  │                                                  │   │
+│  │  CLI ──HTTP GET /api/v1/sandboxes/abc123/ssh─►│   │
+│  │     │                                            │   │
+│  │     │  Headers: Authorization: Bearer <api-key>│   │
+│  │     │                                            │   │
+│  │     ◄──HTTP 200 OK──                          │   │
+│  │          {                                      │   │
+│  │            "host": "localhost",                │   │
+│  │            "port": 2222,                       │   │
+│  │            "user": "root",                     │   │
+│  │            "token": "cp_token_xxxxx",         │   │
+│  │            "expires_in": 3600                 │   │
+│  │          }                                     │   │
+│  │                                                  │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  步骤 2: SSH 连接到 Sandbox                            │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │                                                  │   │
+│  │  $ ssh -p 2222 root@localhost                 │   │
+│  │     # 输入 Token 作为密码                      │   │
+│  │                                                  │   │
+│  │  或者 (推荐): 使用 SSHpass                      │   │
+│  │  $ sshpass -p "<token>" ssh -p 2222 root@localhost│   │
+│  │                                                  │   │
+│  │  或者 (配置 SSH config):                       │   │
+│  │  # ~/.ssh/config:                             │   │
+│  │  Host codepod-abc123                          │   │
+│  │      HostName localhost                        │   │
+│  │      Port 2222                                │   │
+│  │      User root                                 │   │
+│  │      ProxyCommand codepod ssh-proxy %h %p    │   │
+│  │                                                  │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+│  步骤 3: Token 验证                                    │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │                                                  │   │
+│  │  Agent ──验证 Token──►                         │   │
+│  │     - 检查 Token 有效性                        │   │
+│  │     - 检查 Token 过期时间                      │   │
+│  │     - 验证通过，启动 Shell                     │   │
+│  │                                                  │   │
+│  └─────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+**API 接口列表:**
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/api/v1/sandboxes` | 创建 Sandbox |
+| `GET` | `/api/v1/sandboxes` | 列出 Sandbox |
+| `GET` | `/api/v1/sandboxes/:id` | 获取 Sandbox 详情 |
+| `DELETE` | `/api/v1/sandboxes/:id` | 删除 Sandbox |
+| `GET` | `/api/v1/sandboxes/:id/ssh` | 获取 SSH 连接信息 + Token |
+| `POST` | `/api/v1/sandboxes/:id/snapshots` | 创建快照 |
+| `POST` | `/api/v1/sandboxes/:id/snapshots/:snapId/restore` | 恢复快照 |
 
 ### 2.2 SDK 子系统
 
