@@ -3,4 +3,5 @@ go 1.21
 use (
 	./libs/sdk-go
 	./apps/runner
+	./apps/agent
 )
