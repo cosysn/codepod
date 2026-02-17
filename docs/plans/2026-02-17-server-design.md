@@ -21,7 +21,7 @@ Server 是 CodePod 的控制平面核心组件，提供 RESTful API 供 CLI 和 
 - **缓存**：内存缓存（默认）/ Redis（可选，会话、速率限制）
 - **消息队列**：内存队列（默认）/ RabbitMQ / NATS（可选，异步任务）
 - **gRPC 服务端**：@grpc/grpc-js（接收 Runner 连接）
-- **安全**：Helmet、CORS、压缩
+- **安全**：Helmet、CORS、压缩、bcrypt（密码加密）
 
 ---
 
@@ -61,7 +61,7 @@ apps/server/
 │   │
 │   ├── grpc/
 │   │   ├── client.ts               # gRPC 客户端
-│   │   ├── runner-client.ts        # Runner 通信
+│   │   ├── server.ts               # gRPC 服务端
 │   │   └── types.ts                # gRPC 类型定义
 │   │
 │   ├── database/
@@ -183,6 +183,130 @@ apps/server/
 ## 3. API 设计
 
 ### 3.1 认证与授权
+
+#### 用户注册
+
+```typescript
+// POST /api/v1/auth/register
+// 用户注册
+
+interface RegisterRequest {
+  email: string;
+  name: string;
+  password: string;
+}
+
+interface RegisterResponse {
+  id: string;
+  email: string;
+  name: string;
+  createdAt: string;
+  // 默认配额信息
+  quota: {
+    maxSandboxes: number;
+    maxCpu: number;
+    maxMemory: string;
+  };
+}
+```
+
+#### 用户登录
+
+```typescript
+// POST /api/v1/auth/login
+// 用户登录，获取 JWT Token
+
+interface LoginRequest {
+  email: string;
+  password: string;
+}
+
+interface LoginResponse {
+  token: string;           // JWT Token
+  expiresAt: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+  };
+}
+```
+
+#### Token 认证中间件
+
+```typescript
+// src/api/middleware/auth.middleware.ts
+
+import { Request, Response, NextFunction } from 'express';
+import jwt from 'jsonwebtoken';
+import { ApiKeyService } from '../services/api-key.service';
+
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+
+// API Key 认证
+export async function authMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const apiKey = req.headers['x-api-key'] as string;
+
+  if (!apiKey) {
+    res.status(401).json({
+      error: 'Unauthorized',
+      message: 'API key is required'
+    });
+    return;
+  }
+
+  try {
+    const keyRecord = await ApiKeyService.validate(apiKey);
+    if (!keyRecord) {
+      res.status(401).json({ error: 'Unauthorized', message: 'Invalid API key' });
+      return;
+    }
+    if (keyRecord.status === 'revoked') {
+      res.status(401).json({ error: 'Unauthorized', message: 'API key has been revoked' });
+      return;
+    }
+    if (keyRecord.expiresAt && new Date(keyRecord.expiresAt) < new Date()) {
+      res.status(401).json({ error: 'Unauthorized', message: 'API key has expired' });
+      return;
+    }
+
+    (req as any).apiKey = keyRecord;
+    (req as any).userId = keyRecord.userId;
+    await ApiKeyService.updateLastUsed(keyRecord.id);
+    next();
+  } catch (error) {
+    res.status(500).json({ error: 'Internal Server Error', message: 'Failed to validate API key' });
+  }
+}
+
+// JWT Token 认证
+export async function jwtAuthMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader?.replace('Bearer ', '');
+
+  if (!token) {
+    res.status(401).json({ error: 'Unauthorized', message: 'Token is required' });
+    return;
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as any;
+    (req as any).user = decoded;
+    next();
+  } catch (error) {
+    res.status(401).json({ error: 'Unauthorized', message: 'Invalid or expired token' });
+  }
+}
+```
 
 #### API Key 管理
 
@@ -1006,35 +1130,150 @@ export class SandboxService {
    */
   private async checkQuota(
     userId: string,
-    resources?: CreateSandboxRequest['resources']
+    requestedResources?: CreateSandboxRequest['resources']
   ): Promise<{ allowed: boolean; reason?: string }> {
     const quota = await prisma.quota.findUnique({
       where: { userId },
     });
 
+    // 如果没有配额限制，允许
     if (!quota) {
       return { allowed: true };
     }
 
-    // 检查当前使用的资源
-    const currentUsage = await prisma.sandbox.groupBy({
-      by: ['userId'],
+    // 1. 检查 Sandbox 数量配额
+    const runningCount = await prisma.sandbox.count({
       where: {
         userId,
         status: { in: ['pending', 'running'] },
       },
-      _count: true,
     });
 
-    const runningCount = currentUsage[0]?._count || 0;
-
     if (runningCount >= quota.maxSandboxes) {
-      return { allowed: false, reason: 'Maximum sandboxes reached' };
+      return { allowed: false, reason: `Maximum sandboxes reached (${quota.maxSandboxes})` };
     }
 
-    // TODO: 检查 CPU/内存配额
+    // 2. 检查 CPU 配额
+    const currentCpuUsage = await this.getUserCpuUsage(userId);
+    const requestedCpu = requestedResources?.cpu || 1;
+    if (currentCpuUsage + requestedCpu > quota.maxCpu) {
+      return {
+        allowed: false,
+        reason: `CPU quota exceeded. Used: ${currentCpuUsage}, Requested: ${requestedCpu}, Max: ${quota.maxCpu}`,
+      };
+    }
+
+    // 3. 检查内存配额
+    const currentMemoryUsage = await this.getUserMemoryUsage(userId);
+    const requestedMemory = this.parseMemory(requestedResources?.memory || '512Mi');
+    const maxMemory = this.parseMemory(quota.maxMemory);
+    if (currentMemoryUsage + requestedMemory > maxMemory) {
+      return {
+        allowed: false,
+        reason: `Memory quota exceeded. Used: ${this.formatMemory(currentMemoryUsage)}, Requested: ${requestedResources?.memory}, Max: ${quota.maxMemory}`,
+      };
+    }
+
+    // 4. 检查磁盘配额
+    const currentDiskUsage = await this.getUserDiskUsage(userId);
+    const requestedDisk = this.parseMemory(requestedResources?.disk || '10Gi');
+    const maxDisk = this.parseMemory(quota.maxDisk);
+    if (currentDiskUsage + requestedDisk > maxDisk) {
+      return {
+        allowed: false,
+        reason: `Disk quota exceeded`,
+      };
+    }
 
     return { allowed: true };
+  }
+
+  /**
+   * 获取用户当前 CPU 使用量
+   */
+  private async getUserCpuUsage(userId: string): Promise<number> {
+    const sandboxes = await prisma.sandbox.findMany({
+      where: {
+        userId,
+        status: { in: ['pending', 'running'] },
+      },
+      select: { resources: true },
+    });
+
+    return sandboxes.reduce((total, s) => {
+      const resources = JSON.parse(s.resources || '{}');
+      return total + (resources.cpu || 0);
+    }, 0);
+  }
+
+  /**
+   * 获取用户当前内存使用量（字节）
+   */
+  private async getUserMemoryUsage(userId: string): Promise<number> {
+    const sandboxes = await prisma.sandbox.findMany({
+      where: {
+        userId,
+        status: { in: ['pending', 'running'] },
+      },
+      select: { resources: true },
+    });
+
+    return sandboxes.reduce((total, s) => {
+      const resources = JSON.parse(s.resources || '{}');
+      return total + this.parseMemory(resources.memory || '0');
+    }, 0);
+  }
+
+  /**
+   * 获取用户当前磁盘使用量（字节）
+   */
+  private async getUserDiskUsage(userId: string): Promise<number> {
+    const sandboxes = await prisma.sandbox.findMany({
+      where: {
+        userId,
+        status: { in: ['pending', 'running'] },
+      },
+      select: { resources: true },
+    });
+
+    return sandboxes.reduce((total, s) => {
+      const resources = JSON.parse(s.resources || '{}');
+      return total + this.parseMemory(resources.disk || '0');
+    }, 0);
+  }
+
+  /**
+   * 解析内存字符串为字节数
+   */
+  private parseMemory(mem: string): number {
+    const units: Record<string, number> = {
+      'Ki': 1024,
+      'Mi': 1024 ** 2,
+      'Gi': 1024 ** 3,
+      'Ti': 1024 ** 4,
+    };
+    for (const [unit, factor] of Object.entries(units)) {
+      if (mem.endsWith(unit)) {
+        return parseFloat(mem) * factor;
+      }
+    }
+    return parseFloat(mem);
+  }
+
+  /**
+   * 格式化字节数为内存字符串
+   */
+  private formatMemory(bytes: number): string {
+    const units = ['B', 'Ki', 'Mi', 'Gi', 'Ti'];
+    let unitIndex = 0;
+    let size = bytes;
+
+    while (size >= 1024 && unitIndex < units.length - 1) {
+      size /= 1024;
+      unitIndex++;
+    }
+
+    return `${size.toFixed(2)}${units[unitIndex]}`;
   }
 
   /**
@@ -1353,6 +1592,166 @@ export class ApiKeyService {
 }
 ```
 
+### 4.4 Proto 文件定义
+
+```protobuf
+// proto/runner/runner.proto
+
+syntax = "proto3";
+
+package runner;
+
+// Runner 向 Server 注册和心跳
+service RunnerService {
+  // Runner 注册
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // 心跳流（保持连接）
+  rpc Heartbeat(stream HeartbeatRequest) returns (stream HeartbeatResponse);
+
+  // 状态上报流
+  rpc ReportStatus(stream StatusReport) returns (stream ControlCommand);
+
+  // 日志上传
+  rpc UploadLogs(stream LogData) returns (Empty);
+}
+
+// 注册请求
+message RegisterRequest {
+  string runner_id = 1;
+  string name = 2;
+  string address = 3;           // Runner 暴露的地址
+  Capacity capacity = 4;        // 容量信息
+  Resources resources = 5;      // 资源信息
+  string region = 6;            // 区域
+  map<string, string> metadata = 7;  // 元数据
+}
+
+// 容量信息
+message Capacity {
+  int32 total = 1;             // 总容量
+  int32 available = 2;         // 可用容量
+}
+
+// 资源信息
+message Resources {
+  ResourceInfo cpu = 1;
+  ResourceInfo memory = 2;
+  ResourceInfo disk = 3;
+}
+
+// 单个资源
+message ResourceInfo {
+  int64 total = 1;
+  int64 used = 2;
+}
+
+// 注册响应
+message RegisterResponse {
+  bool success = 1;
+  string server_version = 2;
+  ServerConfig config = 3;
+  string error_message = 4;
+}
+
+// Server 配置
+message ServerConfig {
+  int32 heartbeat_interval = 1;     // 心跳间隔（毫秒）
+  int32 status_report_interval = 2; // 状态上报间隔（毫秒）
+  int32 max_concurrent_jobs = 3;    // 最大并发 Job 数
+}
+
+// 心跳请求
+message HeartbeatRequest {
+  string runner_id = 1;
+  Resources resources = 2;          // 实时资源使用
+  int64 timestamp = 3;
+}
+
+// 心跳响应
+message HeartbeatResponse {
+  bool pong = 1;
+  ServerConfig config = 2;         // 配置更新
+}
+
+// 状态上报
+message StatusReport {
+  string runner_id = 1;
+  string sandbox_id = 2;
+  string status = 3;               // pending, running, failed, stopped
+  SandboxMetrics metrics = 4;
+  string error = 5;                // 错误信息（如果失败）
+  int64 timestamp = 6;
+}
+
+// Sandbox 指标
+message SandboxMetrics {
+  double cpu_usage = 1;            // CPU 使用率 (0-100)
+  int64 memory_usage = 2;         // 内存使用（字节）
+  int64 disk_usage = 3;           // 磁盘使用（字节）
+  int64 network_in = 4;           // 网络入流量（字节）
+  int64 network_out = 5;          // 网络出流量（字节）
+}
+
+// 控制命令
+message ControlCommand {
+  string command = 1;              // UPDATE, SHUTDOWN, RESTART, UPDATE_CONFIG
+  bytes payload = 2;
+}
+
+// 日志数据
+message LogData {
+  string sandbox_id = 1;
+  string stream_type = 2;          // stdout, stderr
+  bytes data = 3;
+  int64 timestamp = 4;
+}
+
+// 空响应
+message Empty {}
+
+// Server 向 Runner 发送命令（Runner 暴露的服务）
+service RunnerControlService {
+  rpc SubmitJob(JobRequest) returns (JobResponse);
+  rpc SendControlCommand(ControlCommandRequest) returns (Empty);
+  rpc GetSandboxStatus(StatusRequest) returns (StatusResponse);
+}
+
+// Job 请求
+message JobRequest {
+  string job_id = 1;
+  string runner_id = 2;
+  string job_type = 3;            // CREATE_SANDBOX, DELETE_SANDBOX, CREATE_SNAPSHOT, RESTORE_SNAPSHOT
+  string payload = 4;             // JSON 序列化
+  int32 priority = 5;
+}
+
+// Job 响应
+message JobResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+// 控制命令请求
+message ControlCommandRequest {
+  string sandbox_id = 1;
+  string command = 2;              // STOP, RESTART, EXECUTE
+  string payload = 3;
+}
+
+// 状态请求
+message StatusRequest {
+  string sandbox_id = 1;
+}
+
+// 状态响应
+message StatusResponse {
+  string sandbox_id = 1;
+  string status = 2;
+  SandboxMetrics metrics = 3;
+}
+```
+
 ---
 
 ## 5. Runner 通信
@@ -1563,11 +1962,65 @@ export class GrpcServer {
   private async handleRunnerDisconnect(runnerId: string): Promise<void> {
     this.runnerConnections.delete(runnerId);
 
-    await RunnerService.updateRunner(runnerId, {
-      status: 'offline',
-    });
+    try {
+      // 1. 更新 Runner 状态为离线
+      await RunnerService.updateRunner(runnerId, {
+        status: 'offline',
+      });
 
-    console.log(`Runner disconnected: ${runnerId}`);
+      // 2. 获取该 Runner 上的所有 Sandbox
+      const sandboxes = await prisma.sandbox.findMany({
+        where: {
+          runnerId,
+          status: { in: ['pending', 'running'] },
+        },
+      });
+
+      if (sandboxes.length === 0) {
+        console.log(`Runner ${runnerId} disconnected (no active sandboxes)`);
+        return;
+      }
+
+      // 3. 更新所有 Sandbox 状态为 "unreachable"
+      for (const sandbox of sandboxes) {
+        await prisma.sandbox.update({
+          where: { id: sandbox.id },
+          data: {
+            status: 'unreachable',
+            updatedAt: new Date(),
+          },
+        });
+
+        // 4. 发布事件
+        await EventBus.publish('sandbox.unreachable', {
+          sandboxId: sandbox.id,
+          runnerId,
+          userId: sandbox.userId,
+        });
+
+        // 5. 触发 Webhook
+        await webhookService.dispatch('sandbox.unreachable', {
+          sandboxId: sandbox.id,
+          runnerId,
+          error: 'Runner disconnected',
+        });
+
+        console.log(`Sandbox ${sandbox.id} marked as unreachable`);
+      }
+
+      // 6. 安排恢复检查任务
+      await jobQueue.enqueue('CHECK_ORPHAN_SANDBOX', {
+        runnerId,
+        sandboxIds: sandboxes.map(s => s.id),
+      }, {
+        priority: 5,
+        delay: 60000,  // 1分钟后检查
+      });
+
+      console.log(`Runner ${runnerId} disconnected, ${sandboxes.length} sandboxes marked unreachable`);
+    } catch (error) {
+      console.error(`Error handling runner disconnect ${runnerId}:`, error);
+    }
   }
 
   /**
@@ -2147,6 +2600,60 @@ jobQueue.registerHandler('DELETE_ARCHIVED', async (job) => {
   console.log(`Archived sandbox deleted: ${sandboxId}`);
 });
 
+// 注册孤立 Sandbox 检查任务
+jobQueue.registerHandler('CHECK_ORPHAN_SANDBOX', async (job) => {
+  const { runnerId, sandboxIds } = job.payload;
+
+  // 查找该 Runner
+  const runner = await prisma.runner.findUnique({
+    where: { id: runnerId },
+  });
+
+  // Runner 仍然离线
+  if (!runner || runner.status !== 'online') {
+    // 将 Sandbox 标记为不可恢复
+    for (const sandboxId of sandboxIds) {
+      await prisma.sandbox.update({
+        where: { id: sandboxId },
+        data: { status: 'orphaned' },
+      });
+
+      await EventBus.publish('sandbox.orphaned', {
+        sandboxId,
+        runnerId,
+      });
+
+      console.log(`Sandbox ${sandboxId} marked as orphaned`);
+    }
+    return;
+  }
+
+  // Runner 已恢复在线，更新 Sandbox 状态
+  for (const sandboxId of sandboxIds) {
+    try {
+      // 尝试从 Runner 获取真实状态
+      const status = await grpcClient.getSandboxStatus(runnerId, sandboxId);
+
+      if (status && status.status) {
+        await prisma.sandbox.update({
+          where: { id: sandboxId },
+          data: {
+            status: status.status,
+            metrics: JSON.stringify(status.metrics || {}),
+          },
+        });
+
+        console.log(`Sandbox ${sandboxId} recovered, status: ${status.status}`);
+      } else {
+        // 仍然无法获取状态，保持 unreachable
+        console.log(`Sandbox ${sandboxId} still unreachable`);
+      }
+    } catch (error) {
+      console.error(`Failed to check sandbox ${sandboxId}:`, error);
+    }
+  }
+});
+
 // 注册孤立资源清理任务
 jobQueue.registerHandler('CLEANUP_ORPHANS', async (job) => {
   // 查找状态异常超过阈值的 Sandbox
@@ -2157,6 +2664,7 @@ jobQueue.registerHandler('CLEANUP_ORPHANS', async (job) => {
         lt: new Date(Date.now() - 30 * 60 * 1000),  // 30分钟未更新
       },
     },
+    take: 100,
   });
 
   for (const sandbox of orphaned) {
@@ -2167,8 +2675,8 @@ jobQueue.registerHandler('CLEANUP_ORPHANS', async (job) => {
       }
 
       // 如果无法确认，标记为可疑
-      await pr({
-        where:isma.sandbox.update { id: sandbox.id },
+      await prisma.sandbox.update({
+        where: { id: sandbox.id },
         data: { status: 'suspected_orphaned' },
       });
     } catch (error) {
