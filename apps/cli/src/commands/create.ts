@@ -56,7 +56,7 @@ export async function createSandboxCmd(image?: string): Promise<void> {
     const response = await api.createSandbox(request);
     console.log('\nSandbox created successfully!');
     console.log(formatter.formatSandbox(response.sandbox));
-    console.log(`\nSSH: ssh ${response.sandbox.user}@${response.sandbox.host} -p ${response.sandbox.sshPort}`);
+    console.log(`\nSSH: ssh ${response.sshUser}@${response.sshHost} -p ${response.sshPort}`);
     console.log(`Token: ${response.token}`);
   } catch (error) {
     const apiError = APIClient.handleError(error);

@@ -2,7 +2,7 @@
  * HTTP Server with REST API routes
  */
 
-import { IncomingMessage, ServerResponse, createServer } from 'http';
+import { IncomingMessage, ServerResponse, createServer as httpCreateServer } from 'http';
 import { sandboxService } from './services/sandbox';
 import { store } from './db/store';
 import { Sandbox, CreateSandboxRequest, ErrorResponse } from './types';
@@ -213,8 +213,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 }
 
 // Create and start server
-export function createServer(): { server: ReturnType<typeof createServer>; start: () => void } {
-  const server = createServer(handleRequest);
+export function createServer(): { server: ReturnType<typeof httpCreateServer>; start: () => void } {
+  const server = httpCreateServer(handleRequest);
 
   const start = (): void => {
     server.listen(PORT, HOST, () => {
