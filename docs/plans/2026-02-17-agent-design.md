@@ -328,11 +328,163 @@ Options:
   --port PORT            SSH 端口 (default: 22)
   --server-url URL       Runner Server URL
   --token TOKEN          认证 Token
+  --env ENV_FILE         环境变量文件 (default: /etc/codepod/env)
   --log-level LEVEL      日志级别 (debug/info/warn/error)
   --version              显示版本
 ```
 
-### 3.2 HTTP API (Agent 内置)
+### 3.2 环境变量注入
+
+环境变量由 Server 注入，支持两种方式：
+
+#### 3.2.1 环境变量来源
+
+```
+┌─────────────────────────────────────────────────────────┐
+│              环境变量注入流程                               │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  Server (创建 Sandbox 请求)                              │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  {                                              │   │
+│  │    "env": {                                    │   │
+│  │      "DATABASE_URL": "postgres://...",         │   │
+│  │      "API_KEY": "sk-xxx",                     │   │
+│  │      "DEBUG": "true"                          │   │
+│  │    },                                           │   │
+│  │    "envFrom": [                               │   │
+│  │      { "secret": "my-secret" },               │   │
+│  │      { "configmap": "app-config" }            │   │
+│  │    ]                                            │   │
+│  │  }                                              │   │
+│  └─────────────────────┬───────────────────────────┘   │
+│                        │                                 │
+│                        │ Runner                          │
+│                        ▼                                 │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  写入环境变量文件                                │   │
+│  │  /etc/codepod/env                              │   │
+│  │  ─────────────────────                         │   │
+│  │  DATABASE_URL=postgres://...                    │   │
+│  │  API_KEY=sk-xxx                                │   │
+│  │  DEBUG=true                                    │   │
+│  └─────────────────────┬───────────────────────────┘   │
+│                        │                                 │
+│                        │ 容器启动                        │
+│                        ▼                                 │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │  Agent 读取环境变量                             │   │
+│  │  export $(cat /etc/codepod/env | xargs)       │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### 3.2.2 环境变量类型
+
+| 类型 | 描述 | 示例 |
+|------|------|------|
+| **内联变量** | 直接在请求中传递 | `"DATABASE_URL": "postgres://..."` |
+| **Secret** | 从密钥管理服务获取 | API Key、密码、Token |
+| **ConfigMap** | 从配置中心获取 | 应用配置 |
+
+#### 3.2.3 敏感变量标记
+
+```yaml
+# 创建 Sandbox 请求
+{
+  "env": {
+    "DEBUG": "true",
+    "DATABASE_URL": "postgres://user:pass@host/db"
+  },
+  "envFrom": [
+    {
+      "type": "secret",
+      "name": "api-credentials",
+      "vars": ["API_KEY", "API_SECRET"]
+    }
+  ],
+  "sensitive": ["API_KEY", "API_SECRET", "DATABASE_URL"]
+}
+```
+
+#### 3.2.4 环境变量处理
+
+```go
+// pkg/config/env.go
+
+type EnvManager struct {
+    envFile  string
+    secrets  map[string]string
+    configmap map[string]string
+}
+
+type EnvConfig struct {
+    // 内联变量
+    Inline map[string]string `json:"env,omitempty"`
+
+    // 从 Secret 引用
+    EnvFrom []EnvFromSource `json:"envFrom,omitempty"`
+
+    // 敏感变量列表 (不记录日志)
+    Sensitive []string `json:"sensitive,omitempty"`
+}
+
+type EnvFromSource struct {
+    Type     string   `json:"type"` // "secret" | "configmap"
+    Name     string   `json:"name"`
+    Vars     []string `json:"vars,omitempty"` // 要引入的变量名
+}
+
+// 加载环境变量
+func (e *EnvManager) Load() error {
+    // 1. 读取 env 文件
+    // 2. 解析 key=value 格式
+    // 3. 标记敏感变量 (不输出到日志)
+}
+
+// 安全处理
+func (e *EnvManager) Get(key string) string {
+    val := os.Getenv(key)
+    if e.isSensitive(key) {
+        return "***REDACTED***"
+    }
+    return val
+}
+```
+
+#### 3.2.5 安全考虑
+
+| 措施 | 描述 |
+|------|------|
+| **文件权限** | env 文件权限 0600，仅 root 可读 |
+| **日志脱敏** | 敏感变量在日志中显示为 `***REDACTED***` |
+| **进程环境** | 仅传递给用户命令，不继承到 Agent 进程 |
+| **内存安全** | 敏感变量使用后立即清理 |
+
+#### 3.2.6 执行时环境变量
+
+```go
+// 执行命令时传递环境变量
+func (ex *Executor) Exec(ctx context.Context, req *ExecRequest) *ExecResult {
+    // 1. 加载基础环境变量
+    env := loadEnvFile("/etc/codepod/env")
+
+    // 2. 添加请求中的环境变量
+    for k, v := range req.Env {
+        env[k] = v
+    }
+
+    // 3. 执行命令
+    cmd := exec.CommandContext(ctx, req.Command...)
+    cmd.Env = toEnvSlice(env)
+    cmd.Dir = req.Dir
+
+    return runCmd(cmd)
+}
+```
+
+### 3.3 HTTP API (Agent 内置)
 
 | 方法 | 路径 | 描述 |
 |------|------|------|
