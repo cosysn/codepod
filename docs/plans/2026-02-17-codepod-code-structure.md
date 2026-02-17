@@ -153,6 +153,10 @@ codepod/
 ├── buf.gen.yaml                   # Protobuf 生成配置
 ├── .golangci.yml                  # Go lint 配置
 ├── .eslintrc.js                   # ESLint 配置
+├── .devcontainer/                 # 开发环境配置 (在 Sandbox 中开发)
+│   ├── devcontainer.json         # VSCode Dev Container 配置
+│   ├── Dockerfile                # 开发环境镜像
+│   └── post-create.sh           # 创建后脚本
 └── README.md
 ```
 

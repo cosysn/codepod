@@ -1,0 +1,33 @@
+{
+  "name": "CodePod Development",
+  "image": "codepod/base:latest",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "dbaeumer.vscode-eslint",
+        "esbenp.prettier-vscode",
+        "golang.go",
+        "ms-python.python",
+        "ms-vscode.vscode-typescript-next"
+      ],
+      "settings": {
+        "go.toolsManagement.autoUpdate": true,
+        "go.useLanguageServer": true,
+        "python.linting.enabled": true,
+        "python.formatting.provider": "black"
+      }
+    }
+  },
+  "onCreateCommand": "bash .devcontainer/post-create.sh",
+  "portsAttributes": {
+    "3000": {
+      "label": "Server",
+      "onAutoForward": "notify"
+    },
+    "22": {
+      "label": "SSH",
+      "onAutoForward": "ignore"
+    }
+  },
+  "updateContentCommand": "bash .devcontainer/post-update.sh"
+}
