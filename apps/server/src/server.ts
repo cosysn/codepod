@@ -197,6 +197,27 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
 
+    if (path === '/api/v1/keys' && method === 'GET') {
+      const keys = store.listAPIKeys();
+      sendJson(res, 200, { keys });
+      return;
+    }
+
+    if (path.startsWith('/api/v1/keys/') && method === 'DELETE') {
+      const id = path.split('/').pop();
+      if (!id) {
+        sendError(res, 400, 'Missing key ID');
+        return;
+      }
+      const deleted = store.deleteAPIKey(id);
+      if (!deleted) {
+        sendError(res, 404, 'Key not found');
+        return;
+      }
+      sendJson(res, 200, { success: true });
+      return;
+    }
+
     // Audit logs
     if (path === '/api/v1/audit' && method === 'GET') {
       const logs = store.getAuditLogs({ limit: 100 });

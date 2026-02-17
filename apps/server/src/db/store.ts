@@ -120,6 +120,22 @@ export class Store {
     return apiKey;
   }
 
+  listAPIKeys(): APIKey[] {
+    return Array.from(this.apiKeys.values());
+  }
+
+  deleteAPIKey(id: string): boolean {
+    // Find key by id
+    for (const [key, apiKey] of this.apiKeys.entries()) {
+      if (apiKey.id === id) {
+        this.apiKeys.delete(key);
+        this.log('DELETE', 'api_key', id);
+        return true;
+      }
+    }
+    return false;
+  }
+
   revokeAPIKey(key: string): boolean {
     const deleted = this.apiKeys.delete(key);
     if (deleted) {
