@@ -1,7 +1,7 @@
 # CodePod Build System
 # All build outputs go to build/ directory
 
-.PHONY: all clean build build-sdk build-runner build-agent build-server build-cli test help
+.PHONY: all clean build build-sdk build-runner build-agent build-server build-cli test help docker-up docker-down docker-logs docker-status
 
 # Directory structure
 BUILD_DIR := build
@@ -10,6 +10,7 @@ RUNNER_DIR := apps/runner
 AGENT_DIR := apps/agent
 SERVER_DIR := apps/server
 CLI_DIR := apps/cli
+DOCKER_DIR := docker
 
 # Default target
 all: help
@@ -181,3 +182,32 @@ dev-server:
 
 dev-cli:
 	@echo "CLI development mode - use npm run dev in apps/cli"
+
+# Docker Targets
+docker-up:
+	@echo "Starting CodePod services with Docker..."
+	cd $(DOCKER_DIR) && docker-compose up -d --build
+	@echo ""
+	@echo "Services started! Check logs with: make docker-logs"
+	@echo "Server: http://localhost:8080"
+
+docker-down:
+	@echo "Stopping CodePod services..."
+	cd $(DOCKER_DIR) && docker-compose down
+	@echo "Services stopped!"
+
+docker-logs:
+	@echo "Showing Docker logs (Ctrl+C to exit)..."
+	cd $(DOCKER_DIR) && docker-compose logs -f
+
+docker-status:
+	@echo "Checking service status..."
+	cd $(DOCKER_DIR) && docker-compose ps
+	@echo ""
+	@echo "Health check:"
+	@curl -s http://localhost:8080/health || echo "Server not responding"
+
+docker-restart:
+	@echo "Restarting CodePod services..."
+	cd $(DOCKER_DIR) && docker-compose down && docker-compose up -d
+	@echo "Services restarted!"

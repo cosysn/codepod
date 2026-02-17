@@ -46,5 +46,11 @@ func (c *Config) Validate() error {
 	if c.Agent.SandboxID == "" {
 		return fmt.Errorf("sandbox ID is required")
 	}
+	if c.Agent.Token == "" {
+		return fmt.Errorf("agent token is required")
+	}
+	if c.Agent.ServerURL == "" {
+		return fmt.Errorf("agent server URL is required")
+	}
 	return nil
 }
