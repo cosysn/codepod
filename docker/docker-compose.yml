@@ -35,6 +35,7 @@ services:
       - CODEPOD_DOCKER_NETWORK=codepod-network
       - CODEPOD_MAX_JOBS=10
       - CODEPOD_LOG_LEVEL=info
+      - CODEPOD_SANDBOX_IMAGE=codepod/agent:latest
     networks:
       - codepod-network
     depends_on:
