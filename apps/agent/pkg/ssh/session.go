@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"os/exec"
 	"sync"
 	"time"
@@ -65,6 +64,11 @@ func (sm *SessionManager) StartShell(channel ssh.Channel) error {
 	// Wait for shell to exit
 	go func() {
 		exitCode := shell.Wait()
+		// Send exit code before closing channel
+		select {
+		case session.ExitChan <- exitCode.ExitCode():
+		default:
+		}
 		close(session.ExitChan)
 		sm.mu.Lock()
 		delete(sm.sessions, session.ID)
@@ -108,12 +112,23 @@ func (sm *SessionManager) GetSession(id string) *Session {
 
 func (sm *SessionManager) CloseSession(id string) error {
 	sm.mu.Lock()
-	defer sm.mu.Unlock()
 	session, ok := sm.sessions[id]
 	if !ok {
+		sm.mu.Unlock()
 		return fmt.Errorf("session not found: %s", id)
 	}
-	session.Cmd.Process.Kill()
 	delete(sm.sessions, id)
+	sm.mu.Unlock()
+
+	// Close PTY to signal EOF to copy goroutines
+	if session.Pty != nil {
+		session.Pty.Master.Close()
+	}
+
+	// Kill process if still running
+	if session.Cmd.Process != nil {
+		session.Cmd.Process.Kill()
+	}
+
 	return nil
 }
