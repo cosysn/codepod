@@ -26,6 +26,9 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build Agent
         run: |
           cd apps/agent
