@@ -1,0 +1,155 @@
+package docker
+
+import (
+	"context"
+	"fmt"
+	"io"
+
+	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
+)
+
+// RealClient is a real Docker client implementation
+type RealClient struct {
+	cli        *client.Client
+	dockerHost string
+}
+
+// NewRealClient creates a new real Docker client
+func NewRealClient(dockerHost string) (*RealClient, error) {
+	cli, err := client.NewClientWithOpts(
+		client.WithHost(dockerHost),
+		client.WithAPIVersionNegotiation(),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Docker client: %w", err)
+	}
+
+	return &RealClient{
+		cli:        cli,
+		dockerHost: dockerHost,
+	}, nil
+}
+
+// CreateContainer creates a Docker container
+func (r *RealClient) CreateContainer(ctx context.Context, config *ContainerConfig) (string, error) {
+	hostConfig := &container.HostConfig{
+		Memory:     config.Memory,
+		CPUPeriod:  config.CPUPeriod,
+		CPUShares:  config.CPUShares,
+		NetworkMode: container.NetworkMode(config.NetworkMode),
+	}
+
+	containerConfig := &container.Config{
+		Image:        config.Image,
+		Env:          config.Env,
+		Cmd:          config.Cmd,
+		Entrypoint:   config.Entrypoint,
+		Labels:       config.Labels,
+	}
+
+	resp, err := r.cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, config.Name)
+	if err != nil {
+		return "", fmt.Errorf("failed to create container: %w", err)
+	}
+
+	return resp.ID, nil
+}
+
+// StartContainer starts a Docker container
+func (r *RealClient) StartContainer(ctx context.Context, containerID string) error {
+	return r.cli.ContainerStart(ctx, containerID, types.ContainerStartOptions{})
+}
+
+// StopContainer stops a Docker container
+func (r *RealClient) StopContainer(ctx context.Context, containerID string, timeout int) error {
+	return r.cli.ContainerStop(ctx, containerID, container.StopOptions{
+		Timeout: &timeout,
+	})
+}
+
+// RemoveContainer removes a Docker container
+func (r *RealClient) RemoveContainer(ctx context.Context, containerID string, force bool) error {
+	return r.cli.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{
+		Force: force,
+	})
+}
+
+// ListContainers lists all containers
+func (r *RealClient) ListContainers(ctx context.Context, all bool) ([]ContainerInfo, error) {
+	containers, err := r.cli.ContainerList(ctx, types.ContainerListOptions{All: all})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	var result []ContainerInfo
+	for _, c := range containers {
+		result = append(result, ContainerInfo{
+			ID:        c.ID,
+			Image:     c.Image,
+			Names:     c.Names,
+			State:     c.State,
+			Status:    c.Status,
+			Labels:    c.Labels,
+			CreatedAt: c.Created.Format("2006-01-02T15:04:05Z"),
+		})
+	}
+
+	return result, nil
+}
+
+// ContainerStatus returns container status
+func (r *RealClient) ContainerStatus(ctx context.Context, containerID string) (string, error) {
+	info, err := r.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", err
+	}
+	return info.State.Status, nil
+}
+
+// PullImage pulls a Docker image
+func (r *RealClient) PullImage(ctx context.Context, image string, auth *AuthConfig) error {
+	return nil // Docker SDK pulls automatically
+}
+
+// ImageExists checks if image exists
+func (r *RealClient) ImageExists(ctx context.Context, image string) (bool, error) {
+	_, _, err := r.cli.ImageInspectWithRaw(ctx, image)
+	if err != nil {
+		if client.IsErrNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// CreateNetwork creates a network
+func (r *RealClient) CreateNetwork(ctx context.Context, name string) (string, error) {
+	resp, err := r.cli.NetworkCreate(ctx, name, types.NetworkCreate{
+		Driver: "bridge",
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create network: %w", err)
+	}
+	return resp.ID, nil
+}
+
+// RemoveNetwork removes a network
+func (r *RealClient) RemoveNetwork(ctx context.Context, networkID string) error {
+	return r.cli.NetworkRemove(ctx, networkID)
+}
+
+// ContainerLogs returns container logs
+func (r *RealClient) ContainerLogs(ctx context.Context, containerID string, follow bool) (io.ReadCloser, error) {
+	logs, err := r.cli.ContainerLogs(ctx, containerID, types.ContainerLogsOptions{
+		Follow:     follow,
+		ShowStdout: true,
+		ShowStderr: true,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get logs: %w", err)
+	}
+	return logs, nil
+}
