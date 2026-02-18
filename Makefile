@@ -66,14 +66,13 @@ build-runner:
 build-agent: build-agent-amd64 build-agent-arm64
 	@echo ""
 	@echo "Agent binaries built:"
-	@ls -la $(BUILD_DIR)/agent* 2>/dev/null || echo "No agent binaries found"
+	@ls -la $(CURDIR)/$(BUILD_DIR)/agent* 2>/dev/null || echo "No agent binaries found"
 
 build-agent-amd64:
 	@echo "Building agent for linux/amd64..."
 	@if [ -f $(AGENT_DIR)/cmd/main.go ]; then \
 		mkdir -p $(BUILD_DIR); \
-		GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(BUILD_DIR)/agent $(AGENT_DIR)/cmd; \
-		echo "Agent built: $(BUILD_DIR)/agent"; \
+		cd $(AGENT_DIR) && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../../$(BUILD_DIR)/agent ./cmd && echo "Agent built: $(CURDIR)/$(BUILD_DIR)/agent" || echo "Agent build failed"; \
 	else \
 		echo "Agent entry point not found: $(AGENT_DIR)/cmd/main.go"; \
 		echo "Skipping Agent build."; \
@@ -83,8 +82,7 @@ build-agent-arm64:
 	@echo "Building agent for linux/arm64..."
 	@if [ -f $(AGENT_DIR)/cmd/main.go ]; then \
 		mkdir -p $(BUILD_DIR); \
-		GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o $(BUILD_DIR)/agent-arm64 $(AGENT_DIR)/cmd; \
-		echo "Agent built: $(BUILD_DIR)/agent-arm64"; \
+		cd $(AGENT_DIR) && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o ../../$(BUILD_DIR)/agent-arm64 ./cmd && echo "Agent built: $(CURDIR)/$(BUILD_DIR)/agent-arm64" || echo "Agent build failed"; \
 	else \
 		echo "Agent entry point not found: $(AGENT_DIR)/cmd/main.go"; \
 		echo "Skipping Agent build."; \

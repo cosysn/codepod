@@ -76,8 +76,11 @@ func (s *SSHServer) isShuttingDown() bool {
 
 func (s *SSHServer) handleConnection(conn net.Conn) {
 	serverConfig := &ssh.ServerConfig{
-		AuthMethods: []ssh.AuthMethod{
-			&serverPasswordAuth{s.config.Token},
+		PasswordCallback: func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
+			if string(password) == s.config.Token {
+				return &ssh.Permissions{}, nil
+			}
+			return nil, fmt.Errorf("invalid password")
 		},
 	}
 

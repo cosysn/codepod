@@ -2,14 +2,11 @@ package ssh
 
 import (
 	"fmt"
-	"io"
-	"log"
 	"os/exec"
 	"sync"
 	"time"
 
 	"golang.org/x/crypto/ssh"
-	"golang.org/x/term"
 )
 
 type SessionManager struct {
@@ -20,9 +17,8 @@ type SessionManager struct {
 type Session struct {
 	ID        string
 	User      string
-	Pty       *term.Pty
 	Cmd       *exec.Cmd
-	ExitChan  chan int
+	ExitChan  chan error
 	StartTime time.Time
 }
 
@@ -35,14 +31,11 @@ func NewSessionManager() *SessionManager {
 func (sm *SessionManager) StartShell(channel ssh.Channel) error {
 	shell := exec.Command("/bin/sh")
 
-	pty, err := term.Pty()
-	if err != nil {
-		return fmt.Errorf("failed to create pty: %w", err)
-	}
-
-	shell.Stdin = pty
-	shell.Stdout = pty
-	shell.Stderr = pty
+	// For simplicity, run without PTY first
+	// PTY support can be added later using github.com/creack/pty
+	shell.Stdin = channel
+	shell.Stdout = channel
+	shell.Stderr = channel
 
 	if err := shell.Start(); err != nil {
 		return fmt.Errorf("failed to start shell: %w", err)
@@ -51,9 +44,8 @@ func (sm *SessionManager) StartShell(channel ssh.Channel) error {
 	session := &Session{
 		ID:        fmt.Sprintf("%d", time.Now().UnixNano()),
 		User:      "root",
-		Pty:       pty,
 		Cmd:       shell,
-		ExitChan:  make(chan int),
+		ExitChan:  make(chan error),
 		StartTime: time.Now(),
 	}
 
@@ -63,32 +55,13 @@ func (sm *SessionManager) StartShell(channel ssh.Channel) error {
 
 	// Wait for shell to exit
 	go func() {
-		exitCode := shell.Wait()
-		// Send exit code before closing channel
-		select {
-		case session.ExitChan <- exitCode.ExitCode():
-		default:
-		}
+		err := shell.Wait()
+		channel.Close()
+		session.ExitChan <- err
 		close(session.ExitChan)
 		sm.mu.Lock()
 		delete(sm.sessions, session.ID)
 		sm.mu.Unlock()
-	}()
-
-	// Copy data between channel and pty
-	go func() {
-		_, err := io.Copy(channel, pty)
-		if err != nil {
-			log.Printf("pty to channel copy error: %v", err)
-		}
-		channel.Close()
-	}()
-
-	go func() {
-		_, err := io.Copy(pty, channel)
-		if err != nil {
-			log.Printf("channel to pty copy error: %v", err)
-		}
 	}()
 
 	return nil
@@ -119,11 +92,6 @@ func (sm *SessionManager) CloseSession(id string) error {
 	}
 	delete(sm.sessions, id)
 	sm.mu.Unlock()
-
-	// Close PTY to signal EOF to copy goroutines
-	if session.Pty != nil {
-		session.Pty.Master.Close()
-	}
 
 	// Kill process if still running
 	if session.Cmd.Process != nil {
