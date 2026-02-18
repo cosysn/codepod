@@ -54,11 +54,12 @@ func TestSandboxSSHConnection(t *testing.T) {
 	// Create sandbox - note: Env is map[string]string
 	manager := sandbox.NewManager(dockerClient)
 	opts := &sandbox.CreateOptions{
-		Name:  testSandboxID,
-		Image: testImage,
+		Name:        testSandboxID,
+		Image:       testImage,
+		NetworkMode: "host",  // Use host network for direct port 22 access
 		Env: map[string]string{
-			"AGENT_TOKEN":     testToken,
-			"AGENT_SANDBOX_ID": testSandboxID,
+			"AGENT_TOKEN":       testToken,
+			"AGENT_SANDBOX_ID":  testSandboxID,
 		},
 		Memory: "512MB",
 		CPU:    1,
@@ -93,9 +94,9 @@ func TestSandboxSSHConnection(t *testing.T) {
 		t.Fatalf("Container not running, status: %s", status)
 	}
 
-	// For direct container access, use host network mode (to be implemented in Task 3)
-	// For now, we connect via bridge network - this test will fail until Task 3
-	host := "localhost"
+	// For direct container access, use host network mode
+	// Connect via 127.0.0.1 for host network mode
+	host := "127.0.0.1"
 	port := 22
 
 	// Connect via SSH
