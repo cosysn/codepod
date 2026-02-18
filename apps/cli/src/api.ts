@@ -52,6 +52,20 @@ export class APIClient {
   }
 
   /**
+   * Stop a sandbox
+   */
+  async stopSandbox(id: string): Promise<void> {
+    await this.client.post(`/api/v1/sandboxes/${id}/stop`);
+  }
+
+  /**
+   * Restart a sandbox
+   */
+  async restartSandbox(id: string): Promise<void> {
+    await this.client.post(`/api/v1/sandboxes/${id}/restart`);
+  }
+
+  /**
    * Get SSH token for a sandbox
    */
   async getToken(id: string): Promise<string> {
