@@ -4,6 +4,17 @@
 
 export type SandboxStatus = 'pending' | 'running' | 'stopped' | 'failed' | 'deleted';
 
+export interface AgentInfo {
+  lastHeartbeat: string; // ISO timestamp
+  ipAddress?: string;
+  hostname?: string;
+  metrics?: {
+    cpuPercent?: number;
+    memoryMB?: number;
+    sessionCount?: number;
+  };
+}
+
 export interface Sandbox {
   id: string;
   name: string;
@@ -16,6 +27,7 @@ export interface Sandbox {
   createdAt: Date;
   expiresAt?: Date;
   metadata?: Record<string, unknown>;
+  agentInfo?: AgentInfo;
 }
 
 export interface CreateSandboxRequest {

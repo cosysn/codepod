@@ -8,6 +8,7 @@ import {
   APIKey,
   AuditLog,
   CreateSandboxRequest,
+  AgentInfo,
 } from '../types';
 
 // Simple UUID generator (browser/node compatible)
@@ -73,6 +74,19 @@ export class Store {
     const updated = { ...sandbox, ...updates };
     this.sandboxes.set(id, updated);
     return updated;
+  }
+
+  updateAgentInfo(id: string, info: Partial<AgentInfo>): Sandbox | undefined {
+    const sandbox = this.sandboxes.get(id);
+    if (!sandbox) return undefined;
+
+    sandbox.agentInfo = {
+      ...sandbox.agentInfo,
+      ...info,
+      lastHeartbeat: new Date().toISOString(),
+    };
+    this.sandboxes.set(id, sandbox);
+    return sandbox;
   }
 
   deleteSandbox(id: string): boolean {
