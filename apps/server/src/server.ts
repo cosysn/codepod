@@ -132,6 +132,42 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
 
+    // Agent status update endpoint (must be before generic :id routes)
+    const statusMatch = path.match(/^\/api\/v1\/sandboxes\/([a-zA-Z0-9-]+)\/status$/);
+    if (statusMatch && method === 'POST') {
+      const sandboxId = statusMatch[1];
+      const body = await parseBody(req);
+      const data = body as {
+        status: string;
+        cpuPercent?: number;
+        memoryMB?: number;
+        sessionCount?: number;
+      };
+
+      const sandbox = store.getSandbox(sandboxId);
+      if (!sandbox) {
+        sendError(res, 404, 'Sandbox not found');
+        return;
+      }
+
+      // Update agent info
+      store.updateAgentInfo(sandboxId, {
+        metrics: {
+          cpuPercent: data.cpuPercent,
+          memoryMB: data.memoryMB,
+          sessionCount: data.sessionCount,
+        }
+      });
+
+      // If status is stopped, update sandbox status
+      if (data.status === 'stopped') {
+        store.updateSandbox(sandboxId, { status: 'stopped' });
+      }
+
+      sendJson(res, 200, { success: true, sandboxId });
+      return;
+    }
+
     if (path.startsWith('/api/v1/sandboxes/') && method === 'GET') {
       const id = path.split('/').pop();
       if (!id) {
@@ -181,42 +217,6 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       }
 
       sendJson(res, 200, { token });
-      return;
-    }
-
-    // Agent status update endpoint
-    const statusMatch = path.match(/^\/api\/v1\/sandboxes\/([a-zA-Z0-9-]+)\/status$/);
-    if (statusMatch && method === 'POST') {
-      const sandboxId = statusMatch[1];
-      const body = await parseBody(req);
-      const data = body as {
-        status: string;
-        cpuPercent?: number;
-        memoryMB?: number;
-        sessionCount?: number;
-      };
-
-      const sandbox = store.getSandbox(sandboxId);
-      if (!sandbox) {
-        sendError(res, 404, 'Sandbox not found');
-        return;
-      }
-
-      // Update agent info
-      store.updateAgentInfo(sandboxId, {
-        metrics: {
-          cpuPercent: data.cpuPercent,
-          memoryMB: data.memoryMB,
-          sessionCount: data.sessionCount,
-        }
-      });
-
-      // If status is stopped, update sandbox status
-      if (data.status === 'stopped') {
-        store.updateSandbox(sandboxId, { status: 'stopped' });
-      }
-
-      sendJson(res, 200, { success: true, sandboxId });
       return;
     }
 
