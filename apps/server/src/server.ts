@@ -6,9 +6,12 @@ import { IncomingMessage, ServerResponse, createServer as httpCreateServer } fro
 import { sandboxService } from './services/sandbox';
 import { store } from './db/store';
 import { Sandbox, CreateSandboxRequest, ErrorResponse } from './types';
+import { GrpcServer } from './grpc/server';
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const HOST = process.env.HOST || '0.0.0.0';
+
+let grpcServer: GrpcServer;
 
 // Simple UUID generator
 function generateId(): string {
@@ -236,6 +239,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 // Create and start server
 export function createServer(): { server: ReturnType<typeof httpCreateServer>; start: () => void } {
   const server = httpCreateServer(handleRequest);
+
+  // Create and start gRPC server
+  grpcServer = new GrpcServer(50051);
+  grpcServer.start().catch(console.error);
 
   const start = (): void => {
     server.listen(PORT, HOST, () => {
