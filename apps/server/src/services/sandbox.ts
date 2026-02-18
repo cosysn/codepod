@@ -4,6 +4,7 @@
 
 import { store } from '../db/store';
 import { Sandbox, SandboxStatus, CreateSandboxRequest, SandboxResponse } from '../types';
+import { createJob } from './job';
 
 // Simple UUID generator
 function generateId(): string {
@@ -26,6 +27,13 @@ export class SandboxService {
 
     // Create sandbox
     const sandbox = store.createSandbox(req);
+
+    // Create job for runner
+    createJob({
+      type: 'create',
+      sandboxId: sandbox.id,
+      image: req.image || sandbox.image,
+    });
 
     // Generate connection info
     const token = this.generateToken();

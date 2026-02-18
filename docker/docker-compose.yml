@@ -26,11 +26,13 @@ services:
     build:
       context: ../apps/runner
       dockerfile: Dockerfile
+      args:
+        - GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
     container_name: codepod-runner
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - CODEPOD_SERVER_URL=http://server:50051
+      - CODEPOD_SERVER_URL=http://server:8080
       - CODEPOD_DOCKER_HOST=unix:///var/run/docker.sock
       - CODEPOD_DOCKER_NETWORK=codepod-network
       - CODEPOD_MAX_JOBS=10

@@ -229,6 +229,30 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
 
+    // Runner registration routes
+    if (path === '/api/v1/runners/register' && method === 'POST') {
+      const body = await parseBody(req);
+      const data = body as Record<string, unknown>;
+      const runnerId = data.id as string;
+      const capacity = data.capacity as number || 10;
+
+      if (!runnerId) {
+        sendError(res, 400, 'Missing runner ID');
+        return;
+      }
+
+      const runner = {
+        id: runnerId,
+        address: '', // Will be populated from request
+        capacity,
+        status: 'available' as const,
+      };
+
+      grpcServer.registerRunner(runner);
+      sendJson(res, 200, { success: true, runnerId });
+      return;
+    }
+
     // Job routes for runner polling
     if (path === '/api/v1/jobs' && method === 'GET') {
       const runnerId = req.headers['x-runner-id'] as string;

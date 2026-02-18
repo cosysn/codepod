@@ -6,10 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"time"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // Job represents a job from the server
@@ -33,41 +29,26 @@ type GrpcClientConfig struct {
 	Capacity  int
 }
 
-// GrpcClient manages the gRPC connection to the server
+// GrpcClient manages the connection to the server (HTTP-based)
 type GrpcClient struct {
-	conn   *grpc.ClientConn
 	config *GrpcClientConfig
 }
 
-// NewGrpcClient creates a new gRPC client connection to the server
+// NewGrpcClient creates a new client connection to the server
 func NewGrpcClient(config *GrpcClientConfig) (*GrpcClient, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(
-		ctx,
-		config.ServerURL,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to server: %w", err)
+	// Validate server URL
+	if config.ServerURL == "" {
+		return nil, fmt.Errorf("server URL is required")
 	}
 
 	return &GrpcClient{
-		conn:   conn,
 		config: config,
 	}, nil
 }
 
-// Close closes the gRPC connection
+// Close closes the client connection (no-op for HTTP)
 func (c *GrpcClient) Close() error {
-	return c.conn.Close()
-}
-
-// GetConn returns the underlying gRPC connection
-func (c *GrpcClient) GetConn() *grpc.ClientConn {
-	return c.conn
+	return nil
 }
 
 // GetConfig returns the client configuration

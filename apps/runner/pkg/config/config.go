@@ -145,6 +145,15 @@ func (c *Config) applyDefaults() {
 	if c.Runner.MaxJobs == 0 {
 		c.Runner.MaxJobs = 10
 	}
+	if c.Runner.ID == "" {
+		// Generate a default runner ID using hostname
+		hostname, err := os.Hostname()
+		if err == nil {
+			c.Runner.ID = "runner-" + hostname
+		} else {
+			c.Runner.ID = "runner-" + fmt.Sprintf("%d", os.Getpid())
+		}
+	}
 	if c.Logging.Level == "" {
 		c.Logging.Level = "info"
 	}

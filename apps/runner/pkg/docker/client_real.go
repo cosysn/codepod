@@ -1,6 +1,8 @@
 package docker
 
 import (
+	"archive/tar"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -163,7 +165,36 @@ func (r *RealClient) ContainerLogs(ctx context.Context, containerID string, foll
 
 // CopyFileToContainer copies a file to the container
 func (r *RealClient) CopyFileToContainer(ctx context.Context, containerID, destPath string, content io.Reader) error {
-	err := r.cli.CopyToContainer(ctx, containerID, destPath, content, types.CopyToContainerOptions{
+	// Read all content from the reader
+	data, err := io.ReadAll(content)
+	if err != nil {
+		return fmt.Errorf("failed to read content: %w", err)
+	}
+
+	// Create a tar archive with the file
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+
+	// Get file info (use default permissions)
+	hdr := &tar.Header{
+		Name:     destPath,
+		Mode:     0755,
+		Size:     int64(len(data)),
+		Typeflag: tar.TypeReg,
+	}
+
+	if err := tw.WriteHeader(hdr); err != nil {
+		return fmt.Errorf("failed to write tar header: %w", err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		return fmt.Errorf("failed to write tar content: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return fmt.Errorf("failed to close tar writer: %w", err)
+	}
+
+	// Copy to container
+	err = r.cli.CopyToContainer(ctx, containerID, "/", &buf, types.CopyToContainerOptions{
 		AllowOverwriteDirWithFile: true,
 	})
 	if err != nil {

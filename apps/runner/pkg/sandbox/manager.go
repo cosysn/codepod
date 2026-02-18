@@ -84,6 +84,12 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 		return nil, fmt.Errorf("invalid memory: %w", err)
 	}
 
+	// Determine agent binary path (use default in runner container or provided path)
+	agentBinaryPath := opts.AgentBinaryPath
+	if agentBinaryPath == "" {
+		agentBinaryPath = "/usr/local/bin/agent"
+	}
+
 	config := &docker.ContainerConfig{
 		Image:      opts.Image,
 		Name:       opts.Name,
@@ -117,9 +123,9 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 	}
 
 	// Copy agent binary to container (after creation, before start)
-	if opts.AgentBinaryPath != "" {
-		// Read agent binary from host
-		binaryContent, err := os.ReadFile(opts.AgentBinaryPath)
+	if agentBinaryPath != "" {
+		// Read agent binary
+		binaryContent, err := os.ReadFile(agentBinaryPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to read agent binary: %w", err)
 		}
