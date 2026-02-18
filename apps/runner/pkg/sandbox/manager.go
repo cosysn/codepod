@@ -49,12 +49,13 @@ type Config struct {
 
 // CreateOptions holds options for creating a sandbox
 type CreateOptions struct {
-	Image   string
-	Name    string
-	Env     map[string]string
-	Memory  string
-	CPU     int
-	Timeout time.Duration
+	Image        string
+	Name         string
+	Env          map[string]string
+	Memory       string
+	CPU          int
+	Timeout      time.Duration
+	NetworkMode  string  // "bridge", "host", or network name
 }
 
 // NewManager creates a new sandbox manager
@@ -86,7 +87,10 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 		Memory:     memory,
 		CPUPeriod:  100000,
 		CPUShares:  int64(opts.CPU * 1024),
-		NetworkMode: "bridge",
+		NetworkMode: opts.NetworkMode,
+	}
+	if opts.NetworkMode == "" {
+		config.NetworkMode = "bridge"
 	}
 
 	// Create container
