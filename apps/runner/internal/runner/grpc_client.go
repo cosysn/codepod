@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -194,4 +195,43 @@ func (c *GrpcClient) DeleteJob(ctx context.Context, job *Job) error {
 	}
 
 	return fmt.Errorf("delete job failed: %d", resp.StatusCode)
+}
+
+// SandboxStatusUpdate represents a status update request
+type SandboxStatusUpdate struct {
+	Status      string `json:"status"`
+	ContainerID string `json:"containerId,omitempty"`
+	Message     string `json:"message,omitempty"`
+}
+
+// UpdateSandboxStatus sends a status update to the server
+func (c *GrpcClient) UpdateSandboxStatus(ctx context.Context, sandboxID string, update *SandboxStatusUpdate) error {
+	// Build URL - remove trailing slash if present
+	serverURL := strings.TrimRight(c.config.ServerURL, "/")
+	url := fmt.Sprintf("%s/api/v1/sandboxes/%s/runner-status", serverURL, sandboxID)
+
+	data, err := json.Marshal(update)
+	if err != nil {
+		return fmt.Errorf("failed to marshal status update: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Runner-Id", c.config.RunnerID)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send status update: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	return nil
 }

@@ -178,6 +178,14 @@ func (r *Runner) handleJob(ctx context.Context, job *Job) error {
 func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 	log.Printf("Creating sandbox %s with image %s", job.SandboxID, job.Image)
 
+	// Report status: creating
+	if err := r.client.UpdateSandboxStatus(ctx, job.SandboxID, &SandboxStatusUpdate{
+		Status:  "creating",
+		Message: "Creating container",
+	}); err != nil {
+		log.Printf("Warning: failed to report creating status: %v", err)
+	}
+
 	// Generate agent token if not provided
 	agentToken := r.cfg.Agent.Token
 	if agentToken == "" {
@@ -213,15 +221,41 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 	sb, err := r.sandbox.Create(ctx, opts)
 	if err != nil {
 		log.Printf("Failed to create sandbox %s: %v", job.SandboxID, err)
+		r.client.UpdateSandboxStatus(ctx, job.SandboxID, &SandboxStatusUpdate{
+			Status:  "failed",
+			Message: err.Error(),
+		})
 		r.client.CompleteJob(ctx, job.ID, false, fmt.Sprintf("Failed to create sandbox: %v", err))
 		return err
+	}
+
+	// Report status: starting
+	if err := r.client.UpdateSandboxStatus(ctx, job.SandboxID, &SandboxStatusUpdate{
+		Status:      "starting",
+		ContainerID: sb.ContainerID,
+		Message:     "Starting container",
+	}); err != nil {
+		log.Printf("Warning: failed to report starting status: %v", err)
 	}
 
 	// Start sandbox
 	if err := r.sandbox.Start(ctx, sb); err != nil {
 		log.Printf("Failed to start sandbox %s: %v", job.SandboxID, err)
+		r.client.UpdateSandboxStatus(ctx, job.SandboxID, &SandboxStatusUpdate{
+			Status:  "failed",
+			Message: err.Error(),
+		})
 		r.client.CompleteJob(ctx, job.ID, false, fmt.Sprintf("Failed to start sandbox: %v", err))
 		return err
+	}
+
+	// Report status: running
+	if err := r.client.UpdateSandboxStatus(ctx, job.SandboxID, &SandboxStatusUpdate{
+		Status:      "running",
+		ContainerID: sb.ContainerID,
+		Message:     "Container is running",
+	}); err != nil {
+		log.Printf("Warning: failed to report running status: %v", err)
 	}
 
 	log.Printf("Sandbox %s created and started successfully", job.SandboxID)
@@ -232,6 +266,14 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 // handleDeleteJob handles a delete sandbox job
 func (r *Runner) handleDeleteJob(ctx context.Context, job *Job) error {
 	log.Printf("Deleting sandbox %s", job.SandboxID)
+
+	// Report status: deleting
+	if err := r.client.UpdateSandboxStatus(ctx, job.SandboxID, &SandboxStatusUpdate{
+		Status:  "deleting",
+		Message: "Deleting container",
+	}); err != nil {
+		log.Printf("Warning: failed to report deleting status: %v", err)
+	}
 
 	// Try to find the sandbox
 	sb, err := r.sandbox.Get(ctx, job.SandboxID)
@@ -252,6 +294,10 @@ func (r *Runner) handleDeleteJob(ctx context.Context, job *Job) error {
 	// Delete the sandbox
 	if err := r.sandbox.Delete(ctx, sb); err != nil {
 		log.Printf("Failed to delete sandbox %s: %v", job.SandboxID, err)
+		r.client.UpdateSandboxStatus(ctx, job.SandboxID, &SandboxStatusUpdate{
+			Status:  "failed",
+			Message: err.Error(),
+		})
 		r.client.CompleteJob(ctx, job.ID, false, fmt.Sprintf("Failed to delete sandbox: %v", err))
 		return err
 	}
