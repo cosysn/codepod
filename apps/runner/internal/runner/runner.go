@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"time"
@@ -14,6 +15,7 @@ type Runner struct {
 	cfg      *config.Config
 	docker   docker.Client
 	sandbox  *sandbox.Manager
+	grpc     *GrpcClient
 	stopChan chan struct{}
 }
 
@@ -30,16 +32,34 @@ func New() (*Runner, error) {
 
 	log.Printf("Runner configured with server: %s", cfg.Server.URL)
 
+	// Create gRPC client
+	grpcConfig := &GrpcClientConfig{
+		ServerURL: cfg.Server.URL,
+		RunnerID:  cfg.Runner.ID,
+		Capacity:  cfg.Runner.MaxJobs,
+	}
+
+	grpcClient, err := NewGrpcClient(grpcConfig)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create gRPC client: %w", err)
+	}
+
 	return &Runner{
 		cfg:      cfg,
 		docker:   dockerClient,
 		sandbox:  manager,
+		grpc:     grpcClient,
 		stopChan: make(chan struct{}),
 	}, nil
 }
 
 func (r *Runner) Run() {
 	log.Println("Runner is running...")
+
+	// Register with server
+	if err := r.grpc.Register(context.Background()); err != nil {
+		log.Printf("Warning: Failed to register with server: %v", err)
+	}
 
 	// Keep alive ticker
 	ticker := time.NewTicker(30 * time.Second)
@@ -58,6 +78,9 @@ func (r *Runner) Run() {
 
 func (r *Runner) Stop() {
 	log.Println("Stopping runner...")
+	if r.grpc != nil {
+		r.grpc.Close()
+	}
 	close(r.stopChan)
 }
 
@@ -79,4 +102,9 @@ func (r *Runner) GetID() string {
 // GetMaxJobs returns the maximum number of concurrent jobs
 func (r *Runner) GetMaxJobs() int {
 	return r.cfg.Runner.MaxJobs
+}
+
+// GetGrpcClient returns the gRPC client
+func (r *Runner) GetGrpcClient() *GrpcClient {
+	return r.grpc
 }
