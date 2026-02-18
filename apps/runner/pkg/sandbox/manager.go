@@ -1,8 +1,10 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/codepod/codepod/apps/runner/pkg/docker"
@@ -49,13 +51,16 @@ type Config struct {
 
 // CreateOptions holds options for creating a sandbox
 type CreateOptions struct {
-	Image        string
-	Name         string
-	Env          map[string]string
-	Memory       string
-	CPU          int
-	Timeout      time.Duration
-	NetworkMode  string  // "bridge", "host", or network name
+	Image          string
+	Name           string
+	Env            map[string]string
+	Memory         string
+	CPU            int
+	Timeout        time.Duration
+	NetworkMode    string  // "bridge", "host", or network name
+	AgentBinaryPath string  // Path to agent binary on host
+	AgentToken     string  // Token for agent to authenticate
+	AgentServerURL string  // Server URL for agent to connect
 }
 
 // NewManager creates a new sandbox manager
@@ -93,10 +98,36 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 		config.NetworkMode = "bridge"
 	}
 
+	// Configure agent injection before container creation
+	if opts.AgentBinaryPath != "" {
+		// Add agent environment variables
+		config.Env = append(config.Env,
+			fmt.Sprintf("AGENT_TOKEN=%s", opts.AgentToken),
+			fmt.Sprintf("AGENT_SERVER_URL=%s", opts.AgentServerURL),
+		)
+
+		// Set entrypoint to run agent
+		config.Entrypoint = []string{"/tmp/agent", "start"}
+	}
+
 	// Create container
 	containerID, err := m.docker.CreateContainer(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create container: %w", err)
+	}
+
+	// Copy agent binary to container (after creation, before start)
+	if opts.AgentBinaryPath != "" {
+		// Read agent binary from host
+		binaryContent, err := os.ReadFile(opts.AgentBinaryPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read agent binary: %w", err)
+		}
+
+		// Copy binary to container
+		if err := m.docker.CopyFileToContainer(ctx, containerID, "/tmp/agent", bytes.NewReader(binaryContent)); err != nil {
+			return nil, fmt.Errorf("failed to copy agent binary to container: %w", err)
+		}
 	}
 
 	return &Sandbox{
