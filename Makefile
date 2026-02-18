@@ -1,7 +1,7 @@
 # CodePod Build System
 # All build outputs go to build/ directory
 
-.PHONY: all clean build build-sdk build-runner build-agent build-server build-cli test help docker-up docker-down docker-logs docker-status
+.PHONY: all clean build build-sdk build-agent build-agent-amd64 build-agent-arm64 build-runner build-server build-cli test help docker-up docker-down docker-logs docker-status
 
 # Directory structure
 BUILD_DIR := build
@@ -62,12 +62,29 @@ build-runner:
 	fi
 
 # Build Agent (Go) - requires cmd/main.go
-build-agent:
-	@echo "Building Agent..."
+# Supports multiple architectures: amd64 (x86_64), arm64
+build-agent: build-agent-amd64 build-agent-arm64
+	@echo ""
+	@echo "Agent binaries built:"
+	@ls -la $(BUILD_DIR)/agent* 2>/dev/null || echo "No agent binaries found"
+
+build-agent-amd64:
+	@echo "Building agent for linux/amd64..."
 	@if [ -f $(AGENT_DIR)/cmd/main.go ]; then \
 		mkdir -p $(BUILD_DIR); \
-		go build -o $(BUILD_DIR)/agent $(AGENT_DIR)/cmd; \
+		GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $(BUILD_DIR)/agent $(AGENT_DIR)/cmd; \
 		echo "Agent built: $(BUILD_DIR)/agent"; \
+	else \
+		echo "Agent entry point not found: $(AGENT_DIR)/cmd/main.go"; \
+		echo "Skipping Agent build."; \
+	fi
+
+build-agent-arm64:
+	@echo "Building agent for linux/arm64..."
+	@if [ -f $(AGENT_DIR)/cmd/main.go ]; then \
+		mkdir -p $(BUILD_DIR); \
+		GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o $(BUILD_DIR)/agent-arm64 $(AGENT_DIR)/cmd; \
+		echo "Agent built: $(BUILD_DIR)/agent-arm64"; \
 	else \
 		echo "Agent entry point not found: $(AGENT_DIR)/cmd/main.go"; \
 		echo "Skipping Agent build."; \
