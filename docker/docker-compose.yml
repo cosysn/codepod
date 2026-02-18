@@ -24,8 +24,8 @@ services:
 
   runner:
     build:
-      context: ../apps/runner
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: apps/runner/Dockerfile
       args:
         - GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
     container_name: codepod-runner

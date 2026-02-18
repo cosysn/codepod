@@ -11,10 +11,10 @@ WORKDIR /app
 # Install git for go mod download
 RUN apk add --no-cache git
 
-COPY go.mod ./
+COPY apps/runner/go.mod ./
 RUN GOPROXY=$GOPROXY go mod download
 
-COPY . .
+COPY apps/runner/ .
 
 # Build the binary (go mod tidy to fix missing sum entries)
 RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o runner ./cmd
@@ -31,10 +31,10 @@ WORKDIR /app
 # Install git for go mod download
 RUN apk add --no-cache git
 
-COPY agent/go.mod ./
+COPY apps/agent/go.mod ./
 RUN GOSUMDB=$GOSUMDB GOPROXY=$GOPROXY go mod download
 
-COPY agent/ .
+COPY apps/agent/ .
 
 # Build agent binary (go mod tidy to generate go.sum if needed)
 RUN GOSUMDB=$GOSUMDB GOPROXY=$GOPROXY go mod tidy && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o agent ./cmd
@@ -80,7 +80,8 @@ RUN adduser -S runner -G dockerroot 2>/dev/null || true
 # Create config directory
 RUN mkdir -p /app/config && chown -R runner:dockerroot /app
 
-USER runner
+# Run as root for Docker socket access (can be changed to runner after fixing group mapping)
+# USER runner
 
 # Default configuration
 ENV CODEPOD_SERVER_URL=http://server:8080
