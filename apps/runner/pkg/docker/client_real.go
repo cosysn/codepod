@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -35,10 +36,16 @@ func NewRealClient(dockerHost string) (*RealClient, error) {
 // CreateContainer creates a Docker container
 func (r *RealClient) CreateContainer(ctx context.Context, config *ContainerConfig) (string, error) {
 	hostConfig := &container.HostConfig{
-		Memory:     config.Memory,
-		CPUPeriod:  config.CPUPeriod,
-		CPUShares:  config.CPUShares,
 		NetworkMode: container.NetworkMode(config.NetworkMode),
+	}
+
+	// Set resource limits if specified
+	if config.Memory > 0 || config.CPUPeriod > 0 || config.CPUShares > 0 {
+		hostConfig.Resources = container.Resources{
+			Memory:     config.Memory,
+			CPUPeriod:  config.CPUPeriod,
+			CPUShares:  config.CPUShares,
+		}
 	}
 
 	containerConfig := &container.Config{
@@ -92,7 +99,7 @@ func (r *RealClient) ListContainers(ctx context.Context, all bool) ([]ContainerI
 			State:     c.State,
 			Status:    c.Status,
 			Labels:    c.Labels,
-			CreatedAt: c.Created.Format("2006-01-02T15:04:05Z"),
+			CreatedAt: time.Unix(c.Created, 0).Format(time.RFC3339),
 		})
 	}
 
