@@ -86,9 +86,7 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 
 	// Determine agent binary path (use default in runner container or provided path)
 	agentBinaryPath := opts.AgentBinaryPath
-	if agentBinaryPath == "" {
-		agentBinaryPath = "/usr/local/bin/agent"
-	}
+	needsAgentInjection := agentBinaryPath != ""
 
 	config := &docker.ContainerConfig{
 		Image:      opts.Image,
@@ -104,8 +102,7 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 		config.NetworkMode = "bridge"
 	}
 
-	// Configure agent injection before container creation
-	if opts.AgentBinaryPath != "" {
+	if needsAgentInjection {
 		// Add agent environment variables
 		config.Env = append(config.Env,
 			fmt.Sprintf("AGENT_TOKEN=%s", opts.AgentToken),
@@ -123,7 +120,7 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 	}
 
 	// Copy agent binary to container (after creation, before start)
-	if agentBinaryPath != "" {
+	if needsAgentInjection {
 		// Read agent binary
 		binaryContent, err := os.ReadFile(agentBinaryPath)
 		if err != nil {
