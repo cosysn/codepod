@@ -62,6 +62,9 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install npm dependencies
+        run: npm ci --prefix apps/server
+
       - name: Build Agent
         run: |
           cd apps/agent
