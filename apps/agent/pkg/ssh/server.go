@@ -3,9 +3,12 @@ package ssh
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"os/exec"
 	"sync"
+	"syscall"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -19,14 +22,23 @@ type ServerConfig struct {
 }
 
 type SSHServer struct {
-	config    *ServerConfig
-	mu        sync.RWMutex
-	listeners []net.Listener
-	running   bool
+	config     *ServerConfig
+	mu         sync.RWMutex
+	listeners  []net.Listener
+	running    bool
+	sessionMgr *SessionManager
 }
 
 func NewServer(cfg *ServerConfig) *SSHServer {
-	return &SSHServer{config: cfg}
+	return &SSHServer{
+		config:     cfg,
+		sessionMgr: NewSessionManager(),
+	}
+}
+
+// SetSessionManager sets the session manager (for testing)
+func (s *SSHServer) SetSessionManager(mgr *SessionManager) {
+	s.sessionMgr = mgr
 }
 
 func (s *SSHServer) Start(ctx context.Context) error {
@@ -91,6 +103,7 @@ func (s *SSHServer) handleConnection(conn net.Conn) {
 	}
 	defer sshConn.Close()
 
+	// Handle requests in a separate goroutine
 	go ssh.DiscardRequests(reqs)
 
 	for newChannel := range chans {
@@ -104,24 +117,102 @@ func (s *SSHServer) handleConnection(conn net.Conn) {
 			log.Printf("Failed to accept channel: %v", err)
 			continue
 		}
-		go ssh.DiscardRequests(requests)
-		go s.handleSession(channel)
+
+		go s.handleSession(channel, requests, sshConn.User())
 	}
 }
 
-func (s *SSHServer) handleSession(channel ssh.Channel) {
-	log.Printf("New session started")
-	// Session handling will be implemented in Task 3
+func (s *SSHServer) handleSession(channel ssh.Channel, requests <-chan *ssh.Request, user string) {
+	log.Printf("New session started for user: %s", user)
 
-	// Keep connection alive until closed
-	buffer := make([]byte, 1024)
-	for {
-		_, err := channel.Read(buffer)
-		if err != nil {
-			break
-		}
+	// Create a new session with PTY
+	session, err := s.sessionMgr.Create(&SessionConfig{
+		Type: SessionTypeInteractive,
+		User: user,
+		Cols: 80,
+		Rows: 24,
+	})
+	if err != nil {
+		log.Printf("Failed to create session: %v", err)
+		channel.Close()
+		return
 	}
+
+	// Handle requests (window-change, etc.)
+	go func() {
+		for req := range requests {
+			switch req.Type {
+			case "window-change":
+				var termReq termRequest
+				if err := ssh.Unmarshal(req.Payload, &termReq); err == nil {
+					if termReq.Columns > 0 && termReq.Rows > 0 {
+						session.PTY.Resize(uint16(termReq.Columns), uint16(termReq.Rows))
+					}
+				}
+				req.Reply(true, nil)
+			default:
+				req.Reply(false, nil)
+			}
+		}
+	}()
+
+	// Start shell process
+	cmd, err := s.startShell(session)
+	if err != nil {
+		log.Printf("Failed to start shell: %v", err)
+		s.sessionMgr.Close(session.ID)
+		channel.Close()
+		return
+	}
+
+	// Copy data between channel and PTY
+	go io.Copy(channel, session.PTY.Master)
+	go io.Copy(session.PTY.Master, channel)
+
+	// Wait for command to finish
+	cmd.Wait()
+
+	// Send exit status
+	var exitCode int
+	if cmd.ProcessState != nil {
+		exitCode = cmd.ProcessState.ExitCode()
+	}
+
+	channel.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{
+		ExitStatus: uint32(exitCode),
+	}))
+
+	s.sessionMgr.Close(session.ID)
 	channel.Close()
+	log.Printf("Session closed for user: %s", user)
+}
+
+type termRequest struct {
+	Term     string
+	Columns  uint32
+	Rows     uint32
+	Width    uint32
+	Height   uint32
+}
+
+type exitStatusMsg struct {
+	ExitStatus uint32
+}
+
+func (s *SSHServer) startShell(session *Session) (*exec.Cmd, error) {
+	cmd := exec.Command("/bin/sh")
+	cmd.Stdin = session.PTY.Slave
+	cmd.Stdout = session.PTY.Slave
+	cmd.Stderr = session.PTY.Slave
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setsid: true,
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	return cmd, nil
 }
 
 func (s *SSHServer) Stop() error {
