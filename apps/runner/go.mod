@@ -2,7 +2,10 @@ module github.com/codepod/codepod/apps/runner
 
 go 1.21
 
-require github.com/docker/docker v23.0.0+incompatible
+require (
+	github.com/docker/docker v23.0.0+incompatible
+	golang.org/x/crypto v0.23.0
+)
 
 require (
 	github.com/Microsoft/go-winio v0.4.21 // indirect

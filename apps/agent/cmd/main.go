@@ -15,10 +15,7 @@ import (
 func main() {
 	log.Println("Starting CodePod Agent...")
 
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
-	}
+	cfg := config.LoadFromEnv()
 
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("Invalid configuration: %v", err)
