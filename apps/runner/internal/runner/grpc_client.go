@@ -3,6 +3,8 @@ package runner
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -58,10 +60,29 @@ func (c *GrpcClient) GetConfig() *GrpcClientConfig {
 	return c.config
 }
 
-// Register registers the runner with the server
+// Register registers the runner with the server via HTTP
 func (c *GrpcClient) Register(ctx context.Context) error {
-	// Simplified: HTTP fallback for now
-	// In real implementation, this would register with the gRPC server
-	fmt.Printf("Registering runner %s with server at %s\n", c.config.RunnerID, c.config.ServerURL)
+	// Register via HTTP for now
+	url := fmt.Sprintf("%s/api/v1/runners/register", c.config.ServerURL)
+
+	// Use HTTP client
+	body := fmt.Sprintf(`{"id":"%s","capacity":%d}`, c.config.RunnerID, c.config.Capacity)
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("registration failed: %d", resp.StatusCode)
+	}
+
+	fmt.Printf("Runner %s registered successfully\n", c.config.RunnerID)
 	return nil
 }
