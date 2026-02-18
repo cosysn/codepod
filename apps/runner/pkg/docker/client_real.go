@@ -160,3 +160,14 @@ func (r *RealClient) ContainerLogs(ctx context.Context, containerID string, foll
 	}
 	return logs, nil
 }
+
+// CopyFileToContainer copies a file to the container
+func (r *RealClient) CopyFileToContainer(ctx context.Context, containerID, destPath string, content io.Reader) error {
+	err := r.cli.CopyToContainer(ctx, containerID, destPath, content, types.CopyToContainerOptions{
+		AllowOverwriteDirWithFile: true,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to copy file to container: %w", err)
+	}
+	return nil
+}

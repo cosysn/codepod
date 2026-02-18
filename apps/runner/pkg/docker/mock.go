@@ -200,6 +200,19 @@ func (m *MockClient) ContainerLogs(ctx context.Context, containerID string, foll
 	return r, nil
 }
 
+// CopyFileToContainer copies a file to the container
+func (m *MockClient) CopyFileToContainer(ctx context.Context, containerID, destPath string, content io.Reader) error {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	_, ok := m.containers[containerID]
+	if !ok {
+		return &Error{Code: "NOT_FOUND", Message: "Container not found"}
+	}
+
+	return nil
+}
+
 // mockReader is a simple io.ReadCloser for mock logs
 type mockReader struct {
 	content []byte

@@ -27,6 +27,9 @@ type Client interface {
 
 	// Logs
 	ContainerLogs(ctx context.Context, containerID string, follow bool) (io.ReadCloser, error)
+
+	// File operations
+	CopyFileToContainer(ctx context.Context, containerID, destPath string, content io.Reader) error
 }
 
 // ContainerConfig holds Docker container configuration
