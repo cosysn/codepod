@@ -89,6 +89,32 @@ export class Store {
     return sandbox;
   }
 
+  updateSandboxRunnerStatus(
+    id: string,
+    status: {
+      runnerId?: string;
+      containerId?: string;
+      sandboxStatus?: SandboxStatus;
+    }
+  ): Sandbox | undefined {
+    const sandbox = this.sandboxes.get(id);
+    if (!sandbox) return undefined;
+
+    const updated = { ...sandbox };
+    if (status.runnerId) {
+      updated.runnerId = status.runnerId;
+    }
+    if (status.containerId) {
+      updated.containerId = status.containerId;
+    }
+    if (status.sandboxStatus) {
+      updated.status = status.sandboxStatus;
+    }
+
+    this.sandboxes.set(id, updated);
+    return updated;
+  }
+
   deleteSandbox(id: string): boolean {
     const deleted = this.sandboxes.delete(id);
     if (deleted) {

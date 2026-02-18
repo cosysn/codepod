@@ -6,7 +6,7 @@ import { IncomingMessage, ServerResponse, createServer as httpCreateServer } fro
 import { sandboxService } from './services/sandbox';
 import { createJob, getPendingJobs, assignJob, getAllJobs } from './services/job';
 import { store } from './db/store';
-import { Sandbox, CreateSandboxRequest, ErrorResponse } from './types';
+import { Sandbox, CreateSandboxRequest, ErrorResponse, SandboxStatus } from './types';
 import { GrpcServer } from './grpc/server';
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
@@ -51,7 +51,7 @@ function sendJson(res: ServerResponse, statusCode: number, data: unknown): void 
     'Content-Type': 'application/json',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
+    'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, X-Runner-Id',
   });
   res.end(JSON.stringify(data));
 }
@@ -98,7 +98,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
+      'Access-Control-Allow-Headers': 'Content-Type, X-API-Key, X-Runner-Id',
     });
     res.end();
     return;
@@ -165,6 +165,53 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       }
 
       sendJson(res, 200, { success: true, sandboxId });
+      return;
+    }
+
+    // Runner status update endpoint
+    const runnerStatusMatch = path.match(/^\/api\/v1\/sandboxes\/([a-zA-Z0-9-]+)\/runner-status$/);
+    if (runnerStatusMatch && method === 'POST') {
+      const sandboxId = runnerStatusMatch[1];
+      const runnerId = req.headers['x-runner-id'] as string;
+
+      if (!runnerId) {
+        sendError(res, 400, 'Missing X-Runner-Id header');
+        return;
+      }
+
+      const body = await parseBody(req);
+      const data = body as {
+        status: SandboxStatus;
+        containerId?: string;
+        message?: string;
+      };
+
+      const sandbox = store.getSandbox(sandboxId);
+      if (!sandbox) {
+        sendError(res, 404, 'Sandbox not found');
+        return;
+      }
+
+      // Verify this sandbox is assigned to this runner
+      if (sandbox.runnerId && sandbox.runnerId !== runnerId) {
+        sendError(res, 403, 'Sandbox is assigned to a different runner');
+        return;
+      }
+
+      // Update sandbox status
+      store.updateSandboxRunnerStatus(sandboxId, {
+        runnerId,
+        containerId: data.containerId,
+        sandboxStatus: data.status,
+      });
+
+      // Log the status change
+      store.log('UPDATE', 'sandbox', sandboxId, runnerId, {
+        status: data.status,
+        message: data.message,
+      });
+
+      sendJson(res, 200, { success: true, sandboxId, status: data.status });
       return;
     }
 

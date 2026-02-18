@@ -28,6 +28,8 @@ export interface Sandbox {
   expiresAt?: Date;
   metadata?: Record<string, unknown>;
   agentInfo?: AgentInfo;
+  runnerId?: string;
+  containerId?: string;
 }
 
 export interface CreateSandboxRequest {
