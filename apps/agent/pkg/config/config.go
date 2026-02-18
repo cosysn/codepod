@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config represents the Agent configuration
@@ -44,6 +45,12 @@ func Load() (*Config, error) {
 }
 
 func LoadFromEnv() *Config {
+	hostKeysEnv := os.Getenv("AGENT_HOST_KEYS")
+	hostKeys := []string{"/etc/ssh/ssh_host_rsa_key"}
+	if hostKeysEnv != "" {
+		hostKeys = parseHostKeys(hostKeysEnv)
+	}
+
 	return &Config{
 		Agent: AgentConfig{
 			Token:     os.Getenv("AGENT_TOKEN"),
@@ -52,11 +59,33 @@ func LoadFromEnv() *Config {
 		},
 		SSH: SSHConfig{
 			Port:        getEnvIntOrDefault("AGENT_SSH_PORT", 22),
-			HostKeys:    []string{"/etc/ssh/ssh_host_rsa_key"},
+			HostKeys:    hostKeys,
 			MaxSessions: getEnvIntOrDefault("AGENT_MAX_SESSIONS", 10),
 			IdleTimeout: getEnvIntOrDefault("AGENT_IDLE_TIMEOUT", 1800),
 		},
 	}
+}
+
+func parseHostKeys(env string) []string {
+	keys := []string{}
+	for _, key := range splitComma(env) {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	if len(keys) == 0 {
+		return []string{"/etc/ssh/ssh_host_rsa_key"}
+	}
+	return keys
+}
+
+func splitComma(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	parts := strings.Split(s, ",")
+	return parts
 }
 
 func getEnvIntOrDefault(key string, defaultVal int) int {
@@ -80,6 +109,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Agent.ServerURL == "" {
 		return fmt.Errorf("agent server URL is required")
+	}
+	if c.SSH.Port <= 0 {
+		return fmt.Errorf("SSH port must be positive")
 	}
 	return nil
 }
