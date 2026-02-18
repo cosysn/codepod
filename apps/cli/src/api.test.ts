@@ -65,14 +65,16 @@ describe('APIClient', () => {
     it('should get a sandbox by id', async () => {
       const mockResponse = {
         data: {
-          id: '123',
-          name: 'test',
-          status: 'running' as const,
-          image: 'ubuntu:20.04',
-          host: 'localhost',
-          port: 2222,
-          user: 'root',
-          createdAt: new Date().toISOString(),
+          sandbox: {
+            id: '123',
+            name: 'test',
+            status: 'running' as const,
+            image: 'ubuntu:20.04',
+            host: 'localhost',
+            port: 2222,
+            user: 'root',
+            createdAt: new Date().toISOString(),
+          },
         },
       };
 
@@ -83,8 +85,8 @@ describe('APIClient', () => {
       const client = new APIClient();
       const result = await client.getSandbox('123');
 
-      expect(result.id).toBe('123');
-      expect(result.name).toBe('test');
+      expect(result?.id).toBe('123');
+      expect(result?.name).toBe('test');
     });
   });
 

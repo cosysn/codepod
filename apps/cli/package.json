@@ -4,7 +4,7 @@
   "description": "CodePod CLI - Command line interface for sandbox management",
   "main": "dist/index.js",
   "bin": {
-    "codepod": "./bin/codepod"
+    "codepod": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc && cp package.json dist/",

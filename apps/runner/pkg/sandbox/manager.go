@@ -22,6 +22,7 @@ type Sandbox struct {
 	ContainerID string
 	Image       string
 	Status      SandboxStatus
+	Port        int  // SSH port mapped to host
 	CreatedAt   time.Time
 	StartedAt   time.Time
 	Config      *Config
@@ -97,6 +98,10 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 		CPUPeriod:  100000,
 		CPUShares:  int64(opts.CPU * 1024),
 		NetworkMode: opts.NetworkMode,
+		// Publish SSH port (22) to host
+		Ports: []docker.PortBinding{
+			{ContainerPort: 22, HostPort: 0, Protocol: "tcp"},
+		},
 	}
 	if opts.NetworkMode == "" {
 		config.NetworkMode = "bridge"
@@ -213,12 +218,22 @@ func (m *Manager) List(ctx context.Context) ([]*Sandbox, error) {
 	for _, c := range containers {
 		// Only include containers with our label
 		if _, ok := c.Labels["codepod.sandbox"]; ok {
+			// Extract SSH port (22) from port bindings
+			port := 0
+			for _, p := range c.Ports {
+				if p.ContainerPort == 22 && p.Protocol == "tcp" {
+					port = p.HostPort
+					break
+				}
+			}
+
 			sb := &Sandbox{
 				ID:          c.ID,
 				Name:        c.Names[0],
 				ContainerID: c.ID,
 				Image:       c.Image,
 				Status:      SandboxStatus(c.State),
+				Port:        port,
 			}
 			sandboxes = append(sandboxes, sb)
 		}
@@ -236,12 +251,22 @@ func (m *Manager) Get(ctx context.Context, id string) (*Sandbox, error) {
 
 	for _, c := range containers {
 		if c.ID == id {
+			// Extract SSH port (22) from port bindings
+			port := 0
+			for _, p := range c.Ports {
+				if p.ContainerPort == 22 && p.Protocol == "tcp" {
+					port = p.HostPort
+					break
+				}
+			}
+
 			return &Sandbox{
 				ID:          c.ID,
 				Name:        c.Names[0],
 				ContainerID: c.ID,
 				Image:       c.Image,
 				Status:      SandboxStatus(c.State),
+				Port:        port,
 			}, nil
 		}
 	}

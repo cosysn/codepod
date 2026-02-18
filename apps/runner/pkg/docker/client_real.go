@@ -11,6 +11,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
+	nat "github.com/docker/go-connections/nat"
 )
 
 // RealClient is a real Docker client implementation
@@ -50,12 +51,32 @@ func (r *RealClient) CreateContainer(ctx context.Context, config *ContainerConfi
 		}
 	}
 
+	// Set up port bindings if specified
+	var exposedPorts nat.PortSet
+	if len(config.Ports) > 0 {
+		exposedPorts = make(nat.PortSet)
+		portBindings := make(nat.PortMap)
+		for _, port := range config.Ports {
+			containerPort := nat.Port(fmt.Sprintf("%d/%s", port.ContainerPort, port.Protocol))
+			exposedPorts[containerPort] = struct{}{}
+			hostPort := ""
+			if port.HostPort > 0 {
+				hostPort = fmt.Sprintf("%d", port.HostPort)
+			}
+			portBindings[containerPort] = []nat.PortBinding{
+				{HostPort: hostPort},
+			}
+		}
+		hostConfig.PortBindings = portBindings
+	}
+
 	containerConfig := &container.Config{
 		Image:        config.Image,
 		Env:          config.Env,
 		Cmd:          config.Cmd,
 		Entrypoint:   config.Entrypoint,
 		Labels:       config.Labels,
+		ExposedPorts: exposedPorts,
 	}
 
 	resp, err := r.cli.ContainerCreate(ctx, containerConfig, hostConfig, nil, nil, config.Name)
@@ -94,12 +115,35 @@ func (r *RealClient) ListContainers(ctx context.Context, all bool) ([]ContainerI
 
 	var result []ContainerInfo
 	for _, c := range containers {
+		// Inspect container to get port bindings
+		var ports []PortBinding
+		info, err := r.cli.ContainerInspect(ctx, c.ID)
+		if err == nil {
+			// Extract port bindings from NetworkSettings
+			for containerPort, bindings := range info.NetworkSettings.Ports {
+				portStr := string(containerPort)
+				var containerPortNum int
+				var protocol string
+				fmt.Sscanf(portStr, "%d/%s", &containerPortNum, &protocol)
+				for _, binding := range bindings {
+					var hostPort int
+					fmt.Sscanf(binding.HostPort, "%d", &hostPort)
+					ports = append(ports, PortBinding{
+						ContainerPort: containerPortNum,
+						HostPort:      hostPort,
+						Protocol:      protocol,
+					})
+				}
+			}
+		}
+
 		result = append(result, ContainerInfo{
 			ID:        c.ID,
 			Image:     c.Image,
 			Names:     c.Names,
 			State:     c.State,
 			Status:    c.Status,
+			Ports:     ports,
 			Labels:    c.Labels,
 			CreatedAt: time.Unix(c.Created, 0).Format(time.RFC3339),
 		})

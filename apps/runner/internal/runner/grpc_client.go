@@ -201,6 +201,7 @@ func (c *GrpcClient) DeleteJob(ctx context.Context, job *Job) error {
 type SandboxStatusUpdate struct {
 	Status      string `json:"status"`
 	ContainerID string `json:"containerId,omitempty"`
+	Port        int    `json:"port,omitempty"`
 	Message     string `json:"message,omitempty"`
 }
 

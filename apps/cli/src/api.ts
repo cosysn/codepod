@@ -31,9 +31,9 @@ export class APIClient {
   /**
    * Get a sandbox by ID
    */
-  async getSandbox(id: string): Promise<Sandbox> {
-    const response = await this.client.get<Sandbox>(`/api/v1/sandboxes/${id}`);
-    return response.data;
+  async getSandbox(id: string): Promise<Sandbox | null> {
+    const response = await this.client.get<{ sandbox: Sandbox }>(`/api/v1/sandboxes/${id}`);
+    return response.data.sandbox || null;
   }
 
   /**

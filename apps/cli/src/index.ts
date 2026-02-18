@@ -8,8 +8,11 @@ import { VERSION } from './version';
 import {
   createSandboxCmd,
   listSandboxesCmd,
+  getSandboxCmd,
   deleteSandboxCmd,
   configureCmd,
+  stopSandboxCmd,
+  restartSandboxCmd,
 } from './commands';
 import { sshCommand } from './commands/ssh';
 
@@ -33,12 +36,31 @@ program
   .action(() => listSandboxesCmd());
 
 program
+  .command('get')
+  .alias('info')
+  .description('Get sandbox details')
+  .argument('[id]', 'Sandbox ID')
+  .action((id) => getSandboxCmd(id));
+
+program
   .command('delete')
   .alias('rm')
   .description('Delete a sandbox')
   .argument('[id]', 'Sandbox ID')
   .option('-f, --force', 'Skip confirmation')
   .action((id, options) => deleteSandboxCmd(id, options.force));
+
+program
+  .command('stop')
+  .description('Stop a running sandbox')
+  .argument('[id]', 'Sandbox ID')
+  .action((id) => stopSandboxCmd(id));
+
+program
+  .command('restart')
+  .description('Restart a sandbox')
+  .argument('[id]', 'Sandbox ID')
+  .action((id) => restartSandboxCmd(id));
 
 program
   .command('configure')

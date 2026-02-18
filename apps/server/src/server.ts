@@ -183,6 +183,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       const data = body as {
         status: SandboxStatus;
         containerId?: string;
+        port?: number;
         message?: string;
       };
 
@@ -202,6 +203,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       store.updateSandboxRunnerStatus(sandboxId, {
         runnerId,
         containerId: data.containerId,
+        port: data.port,
         sandboxStatus: data.status,
       });
 

@@ -253,6 +253,7 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 	if err := r.client.UpdateSandboxStatus(ctx, job.SandboxID, &SandboxStatusUpdate{
 		Status:      "running",
 		ContainerID: sb.ContainerID,
+		Port:        sb.Port,
 		Message:     "Container is running",
 	}); err != nil {
 		log.Printf("Warning: failed to report running status: %v", err)

@@ -20,6 +20,10 @@ export async function getSandboxCmd(id?: string): Promise<void> {
 
   try {
     const sandbox = await api.getSandbox(id);
+    if (!sandbox) {
+      console.error(`Sandbox not found: ${id}`);
+      process.exit(1);
+    }
     const formatter = new Formatter();
     console.log(formatter.formatSandbox(sandbox));
   } catch (error) {

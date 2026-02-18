@@ -40,11 +40,20 @@ export function getJob(id: string): Job | undefined {
  * Get pending jobs, optionally filtered by runnerId
  * Returns jobs that are pending and not yet assigned to any runner
  * or not assigned to the specified runner
+ * Also returns jobs that are running and assigned to the specified runner
  */
 export function getPendingJobs(runnerId?: string): Job[] {
-  return Array.from(jobs.values()).filter((job) =>
-    job.status === 'pending' && (!runnerId || !job.runnerId)
-  );
+  return Array.from(jobs.values()).filter((job) => {
+    // Return pending jobs that are not assigned to any runner
+    if (job.status === 'pending' && (!runnerId || !job.runnerId)) {
+      return true;
+    }
+    // Return running jobs that are assigned to this runner (in case runner restarted)
+    if (job.status === 'running' && runnerId && job.runnerId === runnerId) {
+      return true;
+    }
+    return false;
+  });
 }
 
 /**
