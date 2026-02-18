@@ -4,6 +4,7 @@
 
 import { IncomingMessage, ServerResponse, createServer as httpCreateServer } from 'http';
 import { sandboxService } from './services/sandbox';
+import { createJob, getPendingJobs, assignJob, getAllJobs } from './services/job';
 import { store } from './db/store';
 import { Sandbox, CreateSandboxRequest, ErrorResponse } from './types';
 import { GrpcServer } from './grpc/server';
@@ -225,6 +226,53 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (path === '/api/v1/audit' && method === 'GET') {
       const logs = store.getAuditLogs({ limit: 100 });
       sendJson(res, 200, { logs });
+      return;
+    }
+
+    // Job routes for runner polling
+    if (path === '/api/v1/jobs' && method === 'GET') {
+      const runnerId = req.headers['x-runner-id'] as string;
+      const pendingJobs = getPendingJobs(runnerId);
+      sendJson(res, 200, { jobs: pendingJobs });
+      return;
+    }
+
+    if (path === '/api/v1/jobs' && method === 'POST') {
+      const body = await parseBody(req);
+      if (!body || typeof body !== 'object') {
+        sendError(res, 400, 'Missing request body');
+        return;
+      }
+
+      const data = body as Record<string, unknown>;
+      const job = createJob({
+        type: data.type as 'create' | 'delete',
+        sandboxId: data.sandboxId as string,
+        image: data.image as string,
+      });
+      sendJson(res, 201, { job });
+      return;
+    }
+
+    if (path.startsWith('/api/v1/jobs/') && path.endsWith('/accept') && method === 'POST') {
+      const jobId = path.split('/')[4];
+      if (!jobId) {
+        sendError(res, 400, 'Missing job ID');
+        return;
+      }
+      const runnerId = req.headers['x-runner-id'] as string;
+      if (!runnerId) {
+        sendError(res, 400, 'Missing X-Runner-Id header');
+        return;
+      }
+      const success = assignJob(jobId, runnerId);
+      sendJson(res, 200, { success });
+      return;
+    }
+
+    if (path === '/api/v1/all-jobs' && method === 'GET') {
+      const allJobs = getAllJobs();
+      sendJson(res, 200, { jobs: allJobs });
       return;
     }
 
