@@ -12,22 +12,22 @@ CodePod is a secure sandbox platform for isolated development environments and A
 # Install dependencies (run from project root)
 go work sync          # Go workspace dependencies
 go mod download      # Download Go modules
-npm install          # Node.js dependencies (npm/pnpm)
+npm install          # Node.js dependencies
 
 # Build all components
 make build
 
 # Build individual components
-cd apps/agent && go build -o ../../bin/agent ./cmd
-cd apps/runner && go build -o ../../bin/runner ./cmd
-cd apps/server && npm run build
-cd apps/cli && npm run build
+make build-agent
+make build-runner
+make build-server
+make build-cli
+make build-sdk
 
-# Generate protobuf files
-buf generate
-
-# Run tests
+# Run all tests
 make test
+
+# Run tests for a single component
 cd apps/agent && go test ./...
 cd apps/runner && go test ./...
 cd apps/server && npm test
@@ -35,6 +35,9 @@ cd apps/cli && npm test
 
 # Docker development
 cd docker && docker-compose up -d
+
+# Check build status
+make status
 ```
 
 ## Architecture
@@ -141,4 +144,4 @@ Reference these for implementation details:
 
 ## Current State
 
-This repository contains **design documents only**. The implementation (apps/, libs/, proto/ directories) has not yet been created. Start implementation according to the design documents in `docs/plans/`.
+The project is in active implementation. Core components (Agent, Runner, Server, CLI) are built. SDKs are partially implemented. Refer to the Makefile for build targets and current status via `make status`.
