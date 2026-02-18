@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/shirou/gopsutil/host"
+	"github.com/shirou/gopsutil/mem"
 )
 
 // Config holds the configuration for the reporter client.
@@ -104,9 +107,18 @@ func (c *Client) StartHeartbeat(ctx context.Context, initialStatus *Status) erro
 
 // collectStatus collects the current status for heartbeat.
 func (c *Client) collectStatus(base *Status) *Status {
+	// Get uptime
+	uptime, _ := host.Uptime()
+
+	// Get memory
+	v, _ := mem.VirtualMemory()
+
 	return &Status{
 		Status:      "running",
 		Hostname:   base.Hostname,
-		UptimeSecs: int64(time.Since(base.Timestamp).Seconds()),
+		UptimeSecs: int64(uptime),
+		MemoryMB:   int(v.Used / 1024 / 1024),
+		CPUPercent: 0, // Requires interval for accurate reading
+		SessionCount: base.SessionCount,
 	}
 }
