@@ -2,101 +2,139 @@ package ssh
 
 import (
 	"fmt"
-	"os/exec"
 	"sync"
 	"time"
-
-	"golang.org/x/crypto/ssh"
 )
 
+// SessionType represents the type of session
+type SessionType string
+
+const (
+	SessionTypeInteractive SessionType = "interactive"
+	SessionTypeExec       SessionType = "exec"
+	SessionTypeSubsystem  SessionType = "subsystem"
+)
+
+// SessionStatus represents session state
+type SessionStatus string
+
+const (
+	SessionStatusActive    SessionStatus = "active"
+	SessionStatusClosing SessionStatus = "closing"
+	SessionStatusClosed  SessionStatus = "closed"
+)
+
+// Session represents an SSH session
+type Session struct {
+	ID         string
+	Type       SessionType
+	User       string
+	Status     SessionStatus
+	PTY        *PTY
+	Command    string
+	StartTime  time.Time
+	WindowCols uint16
+	WindowRows uint16
+}
+
+// SessionConfig configures a new session
+type SessionConfig struct {
+	Type       SessionType
+	User       string
+	Cols       uint16
+	Rows       uint16
+	Command    string
+	WorkingDir string
+}
+
+// SessionManager manages SSH sessions
 type SessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
+	ptyAlloc *PTYAllocator
 }
 
-type Session struct {
-	ID        string
-	User      string
-	Cmd       *exec.Cmd
-	ExitChan  chan error
-	StartTime time.Time
-}
-
+// NewSessionManager creates a new manager
 func NewSessionManager() *SessionManager {
 	return &SessionManager{
 		sessions: make(map[string]*Session),
+		ptyAlloc: NewPTYAllocator(),
 	}
 }
 
-func (sm *SessionManager) StartShell(channel ssh.Channel) error {
-	shell := exec.Command("/bin/sh")
+// Create creates a new session
+func (m *SessionManager) Create(cfg *SessionConfig) (*Session, error) {
+	pty, err := m.ptyAlloc.Allocate()
+	if err != nil {
+		return nil, fmt.Errorf("failed to allocate PTY: %w", err)
+	}
 
-	// For simplicity, run without PTY first
-	// PTY support can be added later using github.com/creack/pty
-	shell.Stdin = channel
-	shell.Stdout = channel
-	shell.Stderr = channel
-
-	if err := shell.Start(); err != nil {
-		return fmt.Errorf("failed to start shell: %w", err)
+	if cfg.Cols == 0 {
+		cfg.Cols = 80
+	}
+	if cfg.Rows == 0 {
+		cfg.Rows = 24
 	}
 
 	session := &Session{
-		ID:        fmt.Sprintf("%d", time.Now().UnixNano()),
-		User:      "root",
-		Cmd:       shell,
-		ExitChan:  make(chan error),
-		StartTime: time.Now(),
+		ID:         fmt.Sprintf("session-%d", time.Now().UnixNano()),
+		Type:       cfg.Type,
+		User:       cfg.User,
+		Status:     SessionStatusActive,
+		PTY:        pty,
+		Command:    cfg.Command,
+		StartTime:  time.Now(),
+		WindowCols: cfg.Cols,
+		WindowRows: cfg.Rows,
 	}
 
-	sm.mu.Lock()
-	sm.sessions[session.ID] = session
-	sm.mu.Unlock()
+	m.mu.Lock()
+	m.sessions[session.ID] = session
+	m.mu.Unlock()
 
-	// Wait for shell to exit
-	go func() {
-		err := shell.Wait()
-		channel.Close()
-		session.ExitChan <- err
-		close(session.ExitChan)
-		sm.mu.Lock()
-		delete(sm.sessions, session.ID)
-		sm.mu.Unlock()
-	}()
-
-	return nil
+	return session, nil
 }
 
-func (sm *SessionManager) ListSessions() []*Session {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	sessions := make([]*Session, 0, len(sm.sessions))
-	for _, s := range sm.sessions {
+// Get returns a session by ID
+func (m *SessionManager) Get(id string) *Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.sessions[id]
+}
+
+// List returns all sessions
+func (m *SessionManager) List() []*Session {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	sessions := make([]*Session, 0, len(m.sessions))
+	for _, s := range m.sessions {
 		sessions = append(sessions, s)
 	}
 	return sessions
 }
 
-func (sm *SessionManager) GetSession(id string) *Session {
-	sm.mu.RLock()
-	defer sm.mu.RUnlock()
-	return sm.sessions[id]
-}
+// Close closes a session
+func (m *SessionManager) Close(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-func (sm *SessionManager) CloseSession(id string) error {
-	sm.mu.Lock()
-	session, ok := sm.sessions[id]
+	session, ok := m.sessions[id]
 	if !ok {
-		sm.mu.Unlock()
 		return fmt.Errorf("session not found: %s", id)
 	}
-	delete(sm.sessions, id)
-	sm.mu.Unlock()
 
-	// Kill process if still running
-	if session.Cmd.Process != nil {
-		session.Cmd.Process.Kill()
+	session.Status = SessionStatusClosing
+	if session.PTY != nil {
+		session.PTY.Close()
 	}
-
+	delete(m.sessions, id)
 	return nil
+}
+
+// Count returns the number of active sessions
+func (m *SessionManager) Count() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.sessions)
 }
