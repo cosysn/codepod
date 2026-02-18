@@ -125,12 +125,54 @@ func (s *SSHServer) handleConnection(conn net.Conn) {
 func (s *SSHServer) handleSession(channel ssh.Channel, requests <-chan *ssh.Request, user string) {
 	log.Printf("New session started for user: %s", user)
 
-	// Create a new session with PTY
+	// Wait for the first request to determine session type
+	var sessionType SessionType = SessionTypeInteractive
+	var command string
+	var cols uint16 = 80
+	var rows uint16 = 24
+
+	select {
+	case req, ok := <-requests:
+		if !ok {
+			channel.Close()
+			return
+		}
+		switch req.Type {
+		case "shell":
+			// Interactive shell session
+			sessionType = SessionTypeInteractive
+			req.Reply(true, nil)
+		case "exec":
+			// Single command execution
+			var execReq execRequest
+			if err := ssh.Unmarshal(req.Payload, &execReq); err == nil {
+				command = execReq.Command
+				sessionType = SessionTypeExec
+			}
+			req.Reply(true, nil)
+		case "pty-req":
+			// PTY request with window size
+			var ptyReq ptyRequest
+			if err := ssh.Unmarshal(req.Payload, &ptyReq); err == nil {
+				cols = ptyReq.Columns
+				rows = ptyReq.Rows
+				sessionType = SessionTypeInteractive
+			}
+			req.Reply(true, nil)
+		default:
+			req.Reply(false, nil)
+		}
+	default:
+		// No request, assume shell
+	}
+
+	// Create session
 	session, err := s.sessionMgr.Create(&SessionConfig{
-		Type: SessionTypeInteractive,
-		User: user,
-		Cols: 80,
-		Rows: 24,
+		Type:    sessionType,
+		User:    user,
+		Cols:    cols,
+		Rows:    rows,
+		Command: command,
 	})
 	if err != nil {
 		log.Printf("Failed to create session: %v", err)
@@ -138,7 +180,7 @@ func (s *SSHServer) handleSession(channel ssh.Channel, requests <-chan *ssh.Requ
 		return
 	}
 
-	// Handle requests (window-change, etc.)
+	// Handle remaining requests
 	go func() {
 		for req := range requests {
 			switch req.Type {
@@ -156,6 +198,15 @@ func (s *SSHServer) handleSession(channel ssh.Channel, requests <-chan *ssh.Requ
 		}
 	}()
 
+	// Execute based on session type
+	if sessionType == SessionTypeExec {
+		s.handleExec(channel, session, command)
+	} else {
+		s.handleShell(channel, session)
+	}
+}
+
+func (s *SSHServer) handleShell(channel ssh.Channel, session *Session) {
 	// Start shell process
 	cmd, err := s.startShell(session)
 	if err != nil {
@@ -184,7 +235,44 @@ func (s *SSHServer) handleSession(channel ssh.Channel, requests <-chan *ssh.Requ
 
 	s.sessionMgr.Close(session.ID)
 	channel.Close()
-	log.Printf("Session closed for user: %s", user)
+	log.Printf("Shell session closed for user: %s", session.User)
+}
+
+func (s *SSHServer) handleExec(channel ssh.Channel, session *Session, command string) {
+	defer s.sessionMgr.Close(session.ID)
+	defer channel.Close()
+
+	// Execute command without PTY
+	cmd := exec.Command("/bin/sh", "-c", command)
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			channel.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{
+				ExitStatus: uint32(exitErr.ExitCode()),
+			}))
+		}
+		log.Printf("Exec failed: %v", err)
+		return
+	}
+
+	channel.Write(output)
+	channel.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{
+		ExitStatus: 0,
+	}))
+
+	log.Printf("Exec completed: %s", command)
+}
+
+type ptyRequest struct {
+	Term     string
+	Columns  uint16
+	Rows     uint16
+	Width    uint16
+	Height   uint16
+}
+
+type execRequest struct {
+	Command string
 }
 
 type termRequest struct {
