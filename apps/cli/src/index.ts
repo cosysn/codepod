@@ -9,9 +9,9 @@ import {
   createSandboxCmd,
   listSandboxesCmd,
   deleteSandboxCmd,
-  sshCmd,
   configureCmd,
 } from './commands';
+import { sshCommand } from './commands/ssh';
 
 const program = new Command();
 
@@ -41,15 +41,11 @@ program
   .action((id, options) => deleteSandboxCmd(id, options.force));
 
 program
-  .command('ssh')
-  .description('Get SSH connection info for a sandbox')
-  .argument('<id>', 'Sandbox ID')
-  .action((id) => sshCmd(id));
-
-program
   .command('configure')
   .alias('config')
   .description('Configure CLI settings')
   .action(() => configureCmd());
+
+program.addCommand(sshCommand());
 
 program.parse();

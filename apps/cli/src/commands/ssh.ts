@@ -9,8 +9,9 @@ interface SSHOptions {
 }
 
 export function sshCommand(): Command {
-  const command = new Command('ssh <id>')
+  const command = new Command('ssh')
     .description('Connect to sandbox via SSH')
+    .argument('<id>', 'Sandbox ID')
     .option('--command <cmd>', 'Execute command and exit')
     .option('--interactive', 'Force interactive mode', true)
     .action(async (id, options: SSHOptions) => {

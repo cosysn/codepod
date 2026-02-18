@@ -91,7 +91,7 @@ describe('E2E Tests', () => {
     it('should handle non-existent sandbox', async () => {
       const result = await runCLI(['ssh', 'non-existent-id'], SERVER_URL);
       expect(result.exitCode).not.toBe(0);
-      expect(result.stderr).toContain('Error');
+      expect(result.stderr).toContain('404');
     });
   });
 });
