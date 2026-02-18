@@ -12,7 +12,14 @@ type Config struct {
 	Server  ServerConfig
 	Docker  DockerConfig
 	Runner  RunnerConfig
+	Agent   AgentConfig
 	Logging LoggingConfig
+}
+
+// AgentConfig holds Agent settings
+type AgentConfig struct {
+	BinaryPath string // Path to the agent binary
+	Token      string // Default token for agent authentication
 }
 
 // ServerConfig holds Server connection settings
@@ -144,6 +151,10 @@ func (c *Config) applyDefaults() {
 	if c.Logging.Format == "" {
 		c.Logging.Format = "json"
 	}
+	// Default agent binary path - can be overridden by env var
+	if c.Agent.BinaryPath == "" {
+		c.Agent.BinaryPath = "/usr/local/bin/agent"
+	}
 }
 
 // Validate checks if the configuration is valid
@@ -171,6 +182,10 @@ func LoadFromEnv() *Config {
 		Runner: RunnerConfig{
 			ID:      os.Getenv("CODEPOD_RUNNER_ID"),
 			MaxJobs: getEnvIntOrDefault("CODEPOD_MAX_JOBS", 10),
+		},
+		Agent: AgentConfig{
+			BinaryPath: getEnvOrDefault("CODEPOD_AGENT_BINARY_PATH", ""),
+			Token:      os.Getenv("CODEPOD_AGENT_TOKEN"),
 		},
 		Logging: LoggingConfig{
 			Level:  getEnvOrDefault("CODEPOD_LOG_LEVEL", "info"),
