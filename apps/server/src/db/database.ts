@@ -34,7 +34,7 @@ export class SqliteDB {
       )
     `);
 
-    // Create jobs table
+    // Create jobs table (no foreign key constraint - sandbox_id is optional)
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS jobs (
         id TEXT PRIMARY KEY,
@@ -47,8 +47,7 @@ export class SqliteDB {
         env TEXT,
         memory TEXT,
         cpu INTEGER,
-        network_mode TEXT,
-        FOREIGN KEY (sandbox_id) REFERENCES sandboxes(id)
+        network_mode TEXT
       )
     `);
 

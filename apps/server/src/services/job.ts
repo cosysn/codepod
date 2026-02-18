@@ -1,6 +1,19 @@
 /**
- * Job Service - In-memory job storage for runner job dispatch
+ * Job Service - SQLite-based job storage for runner job dispatch
  */
+
+import { getDatabase } from '../db/database';
+import { JobRepository } from '../db/repository';
+
+let jobRepo: JobRepository | null = null;
+
+function getJobRepo(): JobRepository {
+  if (!jobRepo) {
+    const db = getDatabase();
+    jobRepo = new JobRepository(db);
+  }
+  return jobRepo;
+}
 
 export interface Job {
   id: string;
@@ -10,76 +23,107 @@ export interface Job {
   status: 'pending' | 'running' | 'completed' | 'failed';
   runnerId?: string;
   createdAt: string;
+  env?: Record<string, string>;
+  memory?: string;
+  cpu?: number;
+  networkMode?: string;
 }
-
-// In-memory job storage
-const jobs = new Map<string, Job>();
 
 /**
  * Create a new job
  */
 export function createJob(data: Omit<Job, 'id' | 'status' | 'createdAt'>): Job {
-  const job: Job = {
-    id: `job-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-    ...data,
-    status: 'pending',
-    createdAt: new Date().toISOString(),
+  const repo = getJobRepo();
+  const job = repo.create(data);
+  return {
+    id: job.id,
+    type: job.type as 'create' | 'delete',
+    sandboxId: job.sandboxId,
+    image: job.image,
+    status: job.status as 'pending' | 'running' | 'completed' | 'failed',
+    runnerId: job.runnerId,
+    createdAt: job.createdAt,
+    env: job.env,
+    memory: job.memory,
+    cpu: job.cpu,
+    networkMode: job.networkMode,
   };
-  jobs.set(job.id, job);
-  return job;
 }
 
 /**
  * Get a job by ID
  */
 export function getJob(id: string): Job | undefined {
-  return jobs.get(id);
+  const repo = getJobRepo();
+  const job = repo.getById(id);
+  if (!job) return undefined;
+  return {
+    id: job.id,
+    type: job.type as 'create' | 'delete',
+    sandboxId: job.sandboxId,
+    image: job.image,
+    status: job.status as 'pending' | 'running' | 'completed' | 'failed',
+    runnerId: job.runnerId,
+    createdAt: job.createdAt,
+    env: job.env,
+    memory: job.memory,
+    cpu: job.cpu,
+    networkMode: job.networkMode,
+  };
 }
 
 /**
  * Get pending jobs, optionally filtered by runnerId
- * Returns jobs that are pending and not yet assigned to any runner
- * or not assigned to the specified runner
- * Also returns jobs that are running and assigned to the specified runner
  */
 export function getPendingJobs(runnerId?: string): Job[] {
-  return Array.from(jobs.values()).filter((job) => {
-    // Return pending jobs that are not assigned to any runner
-    if (job.status === 'pending' && (!runnerId || !job.runnerId)) {
-      return true;
-    }
-    // Return running jobs that are assigned to this runner (in case runner restarted)
-    if (job.status === 'running' && runnerId && job.runnerId === runnerId) {
-      return true;
-    }
-    return false;
-  });
+  const repo = getJobRepo();
+  return repo.getPending(runnerId).map((job: any) => ({
+    id: job.id,
+    type: job.type as 'create' | 'delete',
+    sandboxId: job.sandboxId,
+    image: job.image,
+    status: job.status as 'pending' | 'running' | 'completed' | 'failed',
+    runnerId: job.runnerId,
+    createdAt: job.createdAt,
+    env: job.env,
+    memory: job.memory,
+    cpu: job.cpu,
+    networkMode: job.networkMode,
+  }));
 }
 
 /**
  * Assign a job to a runner
  */
 export function assignJob(jobId: string, runnerId: string): boolean {
-  const job = jobs.get(jobId);
-  if (!job || job.status !== 'pending') return false;
-  job.runnerId = runnerId;
-  job.status = 'running';
-  return true;
+  const repo = getJobRepo();
+  return repo.assign(jobId, runnerId);
 }
 
 /**
  * Complete a job
  */
 export function completeJob(jobId: string, success: boolean): boolean {
-  const job = jobs.get(jobId);
-  if (!job) return false;
-  job.status = success ? 'completed' : 'failed';
-  return true;
+  const repo = getJobRepo();
+  return repo.complete(jobId, success);
 }
 
 /**
  * Get all jobs
  */
 export function getAllJobs(): Job[] {
-  return Array.from(jobs.values());
+  const repo = getJobRepo();
+  return repo.getAll().map((job: any) => ({
+    id: job.id,
+    type: job.type as 'create' | 'delete',
+    sandboxId: job.sandboxId,
+    image: job.image,
+    status: job.status as 'pending' | 'running' | 'completed' | 'failed',
+    runnerId: job.runnerId,
+    createdAt: job.createdAt,
+    env: job.env,
+    memory: job.memory,
+    cpu: job.cpu,
+    networkMode: job.networkMode,
+  }));
 }
