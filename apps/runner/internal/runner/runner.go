@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -19,10 +20,20 @@ type Runner struct {
 func New() (*Runner, error) {
 	cfg := config.LoadFromEnv()
 
+	// Create Docker client
+	dockerClient, err := docker.NewClient(cfg.Docker.Host)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create Docker client: %w", err)
+	}
+
+	manager := sandbox.NewManager(dockerClient)
+
 	log.Printf("Runner configured with server: %s", cfg.Server.URL)
 
 	return &Runner{
 		cfg:      cfg,
+		docker:   dockerClient,
+		sandbox:  manager,
 		stopChan: make(chan struct{}),
 	}, nil
 }

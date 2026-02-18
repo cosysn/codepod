@@ -120,3 +120,13 @@ func IsRunning(err error) bool {
 	}
 	return strings.Contains(err.Error(), "is already running")
 }
+
+// NewClient creates a Docker client based on configuration
+// If dockerHost is empty or "mock", returns a MockClient
+func NewClient(dockerHost string) (Client, error) {
+	if dockerHost == "" || dockerHost == "mock" {
+		return NewMockClient(), nil
+	}
+
+	return NewRealClient(dockerHost)
+}
