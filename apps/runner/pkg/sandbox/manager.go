@@ -73,6 +73,11 @@ func NewManager(dockerClient docker.Client) *Manager {
 
 // Create creates a new sandbox
 func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, error) {
+	// Pull image first (auto-pull if not exists)
+	if err := m.docker.PullImage(ctx, opts.Image, nil); err != nil {
+		return nil, fmt.Errorf("failed to pull image %s: %w", opts.Image, err)
+	}
+
 	// Build environment variables
 	env := []string{}
 	for k, v := range opts.Env {

@@ -4,7 +4,7 @@
 FROM golang:1.21-alpine AS runner-builder
 
 # Build arguments
-ARG GOPROXY=https://proxy.golang.org,direct
+ARG GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
 
 WORKDIR /app
 

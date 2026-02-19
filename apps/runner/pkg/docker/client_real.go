@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -163,7 +164,33 @@ func (r *RealClient) ContainerStatus(ctx context.Context, containerID string) (s
 
 // PullImage pulls a Docker image
 func (r *RealClient) PullImage(ctx context.Context, image string, auth *AuthConfig) error {
-	return nil // Docker SDK pulls automatically
+	log.Printf("Pulling Docker image: %s", image)
+
+	// Check if image already exists
+	exists, err := r.ImageExists(ctx, image)
+	if err != nil {
+		return fmt.Errorf("failed to check if image exists: %w", err)
+	}
+	if exists {
+		log.Printf("Image %s already exists", image)
+		return nil
+	}
+
+	// Pull the image
+	pullResp, err := r.cli.ImagePull(ctx, image, types.ImagePullOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to start image pull: %w", err)
+	}
+	defer pullResp.Close()
+
+	// Wait for pull to complete
+	_, err = io.ReadAll(pullResp)
+	if err != nil {
+		return fmt.Errorf("failed to pull image: %w", err)
+	}
+
+	log.Printf("Successfully pulled image: %s", image)
+	return nil
 }
 
 // ImageExists checks if image exists
