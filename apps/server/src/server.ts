@@ -482,10 +482,36 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 export function createServer(): { server: ReturnType<typeof httpCreateServer>; start: () => Promise<void> } {
   const server = httpCreateServer(handleRequest);
 
+  // Cleanup task: check for dead sandboxes every 60 seconds
+  function startCleanupTask(): void {
+    setInterval(() => {
+      const sandboxes = store.listSandboxes();
+      const runningSandboxes = sandboxes.filter(s => s.status === 'running');
+
+      for (const sb of runningSandboxes) {
+        // If last heartbeat is older than 2 minutes, mark as stopped
+        if (sb.agentInfo?.lastHeartbeat) {
+          const lastHeartbeat = new Date(sb.agentInfo.lastHeartbeat);
+          const now = new Date();
+          const diffMinutes = (now.getTime() - lastHeartbeat.getTime()) / 60000;
+
+          if (diffMinutes > 2) {
+            console.log(`Sandbox ${sb.id} has no heartbeat for ${diffMinutes.toFixed(1)} minutes, marking as stopped`);
+            store.updateSandbox(sb.id, { status: 'stopped' });
+          }
+        }
+      }
+    }, 60000); // Check every 60 seconds
+  }
+
   const start = async (): Promise<void> => {
     // Initialize SSH CA
     await sshCAService.initialize();
     console.log('SSH CA initialized');
+
+    // Start cleanup task
+    startCleanupTask();
+    console.log('Cleanup task started');
 
     // Create and start gRPC server
     grpcServer = new GrpcServer(50051);
