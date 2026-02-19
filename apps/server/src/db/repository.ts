@@ -92,12 +92,13 @@ export class SandboxRepository {
 
   updateRunnerStatus(
     id: string,
-    status: { runnerId?: string; containerId?: string; port?: number; sandboxStatus?: SandboxStatus }
+    status: { runnerId?: string; containerId?: string; port?: number; host?: string; sandboxStatus?: SandboxStatus }
   ): Sandbox | undefined {
     const updates: Partial<Sandbox> = {};
     if (status.runnerId) updates.runnerId = status.runnerId;
     if (status.containerId) updates.containerId = status.containerId;
     if (status.port) updates.port = status.port;
+    if (status.host) updates.host = status.host;
     if (status.sandboxStatus) updates.status = status.sandboxStatus;
     return this.update(id, updates);
   }

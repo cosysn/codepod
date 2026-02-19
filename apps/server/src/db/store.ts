@@ -95,6 +95,7 @@ export class Store {
       runnerId?: string;
       containerId?: string;
       port?: number;
+      host?: string;
       sandboxStatus?: SandboxStatus;
     }
   ): Sandbox | undefined {
@@ -110,6 +111,9 @@ export class Store {
     }
     if (status.port) {
       updated.port = status.port;
+    }
+    if (status.host) {
+      updated.host = status.host;
     }
     if (status.sandboxStatus) {
       updated.status = status.sandboxStatus;

@@ -4,7 +4,7 @@
 
 import { IncomingMessage, ServerResponse, createServer as httpCreateServer } from 'http';
 import { sandboxService } from './services/sandbox';
-import { createJob, getPendingJobs, assignJob, getAllJobs } from './services/job';
+import { createJob, getPendingJobs, assignJob, completeJob, getAllJobs } from './services/job';
 import { store } from './db/store';
 import { Sandbox, CreateSandboxRequest, ErrorResponse, SandboxStatus } from './types';
 import { GrpcServer } from './grpc/server';
@@ -185,6 +185,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         status: SandboxStatus;
         containerId?: string;
         port?: number;
+        host?: string;
         message?: string;
       };
 
@@ -205,6 +206,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         runnerId,
         containerId: data.containerId,
         port: data.port,
+        host: data.host,
         sandboxStatus: data.status,
       });
 
@@ -381,6 +383,28 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
 
+    // Complete job endpoint
+    const completeMatch = path.match(/^\/api\/v1\/jobs\/([^\/]+)\/complete$/);
+    if (completeMatch && method === 'POST') {
+      const jobId = completeMatch[1];
+      const runnerId = req.headers['x-runner-id'] as string;
+      if (!runnerId) {
+        sendError(res, 400, 'Missing X-Runner-Id header');
+        return;
+      }
+
+      const body = await parseBody(req);
+      const data = body as { success?: boolean; message?: string };
+
+      const success = data.success !== false;
+      const message = data.message || (success ? 'Job completed' : 'Job failed');
+
+      completeJob(jobId, success);
+      store.log('COMPLETE', 'job', jobId, runnerId, { success, message });
+      sendJson(res, 200, { success, message });
+      return;
+    }
+
     if (path === '/api/v1/all-jobs' && method === 'GET') {
       const allJobs = getAllJobs();
       sendJson(res, 200, { jobs: allJobs });
@@ -392,7 +416,12 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (path === '/api/v1/ssh/ca' && method === 'GET') {
       try {
         const caPublicKey = sshCAService.getCAPublicKey();
-        sendJson(res, 200, { publicKey: caPublicKey });
+        // Return as plain text to preserve newlines
+        res.writeHead(200, {
+          'Content-Type': 'text/plain',
+          'Access-Control-Allow-Origin': '*',
+        });
+        res.end(caPublicKey);
       } catch (e) {
         sendError(res, 500, 'Failed to get CA public key', String(e));
       }

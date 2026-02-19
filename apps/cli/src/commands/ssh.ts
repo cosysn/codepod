@@ -1,6 +1,10 @@
 import { Command } from 'commander';
+import * as fs from 'fs';
+import * as path from 'path';
 import { APIClient } from '../api';
-import { SSHService } from '../services/ssh';
+import { SSHService, SSHConfig } from '../services/ssh';
+import { sshCertService } from '../services/ssh-ca';
+import { configManager } from '../config';
 import ora from 'ora';
 
 interface SSHOptions {
@@ -32,21 +36,32 @@ export function sshCommand(): Command {
           process.exit(1);
         }
 
+        // Get server URL
+        const serverUrl = configManager.getEndpoint();
+        const apiKey = configManager.getAPIKey();
+
+        // Get sandbox connection info
+        const host = sandbox.host || 'localhost';
+        const port = sandbox.port || 22;
+        const user = sandbox.user || 'root';
+
+        // Use password authentication with the sandbox token
+        const token = sandbox.token || '';
+
+        spinner.text = 'Connecting with token authentication...';
+        const sshConfig = SSHService.buildConfig(
+          host,
+          port,
+          user,
+          {
+            password: token,
+          }
+        );
+
         spinner.succeed('Connected');
 
-        // Get connection token
-        const token = await api.getToken(id);
-
         // Connect via SSH
-        await connectViaSSH(
-          {
-            host: sandbox.host,
-            port: sandbox.port || 22,
-            username: sandbox.user,
-          },
-          token,
-          options
-        );
+        await connectViaSSH(sshConfig, options);
       } catch (error: any) {
         spinner.fail(`Connection failed: ${error.message}`);
         process.exit(1);
@@ -57,16 +72,10 @@ export function sshCommand(): Command {
 }
 
 async function connectViaSSH(
-  config: { host: string; port: number; username: string },
-  token: string,
+  config: SSHConfig,
   options: SSHOptions
 ): Promise<void> {
-  const ssh = new SSHService({
-    host: config.host,
-    port: config.port,
-    username: config.username,
-    password: token,
-  });
+  const ssh = new SSHService(config);
 
   await ssh.connect();
 

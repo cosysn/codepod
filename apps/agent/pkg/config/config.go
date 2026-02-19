@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strconv"
@@ -52,8 +53,21 @@ func LoadFromEnv() *Config {
 		hostKeys = parseHostKeys(hostKeysEnv)
 	}
 
-	// Get CA public key from environment (for certificate authentication)
-	trustedUserCAKeys := os.Getenv("AGENT_TRUSTED_USER_CA_KEYS")
+	// Get CA public key from environment (base64 encoded for certificate authentication)
+	trustedUserCAKeysEncoded := os.Getenv("AGENT_TRUSTED_USER_CA_KEYS")
+	var trustedUserCAKeys string
+	fmt.Printf("DEBUG: CA key encoded length: %d\n", len(trustedUserCAKeysEncoded))
+	if trustedUserCAKeysEncoded != "" {
+		// Decode base64-encoded CA key
+		decoded, err := base64.StdEncoding.DecodeString(trustedUserCAKeysEncoded)
+		if err != nil {
+			fmt.Printf("DEBUG: Warning: failed to decode CA key: %v\n", err)
+			trustedUserCAKeys = ""
+		} else {
+			fmt.Printf("DEBUG: CA key decoded, length: %d\n", len(decoded))
+			trustedUserCAKeys = string(decoded)
+		}
+	}
 
 	return &Config{
 		Agent: AgentConfig{

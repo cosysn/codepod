@@ -11,21 +11,32 @@ CodePod is a secure sandbox platform for isolated development environments and A
 ```bash
 # Install dependencies (run from project root)
 go work sync          # Go workspace dependencies
-go mod download      # Download Go modules
+go mod download       # Download Go modules
 npm install          # Node.js dependencies
 
 # Build all components
 make build
 
 # Build individual components
-make build-agent
+make build-agent     # Builds amd64 and arm64 binaries
 make build-runner
 make build-server
 make build-cli
 make build-sdk
 
+# Development mode (run source directly)
+make dev-server      # cd apps/server && npm run dev
+make dev-cli        # cd apps/cli && npm run dev
+# Go components: cd apps/{agent,runner} && go run ./cmd
+
 # Run all tests
 make test
+
+# Test individual components
+make test-agent
+make test-runner
+make test-server
+make test-cli
 
 # Run tests for a single component
 cd apps/agent && go test ./...
@@ -33,12 +44,31 @@ cd apps/runner && go test ./...
 cd apps/server && npm test
 cd apps/cli && npm test
 
-# Docker development
+# Docker development (Server runs on port 8080, gRPC on 50051)
 cd docker && docker-compose up -d
 
 # Check build status
 make status
 ```
+
+## Go Workspace
+
+This project uses `go.work` to manage multi-module dependencies:
+- Agent and Runner are in the workspace
+- SDK is referenced via `replace` directive for local development
+- Run `go work sync` after adding new dependencies
+
+## Linting and Formatting
+
+- **Go**: `go fmt ./...` and `golangci-lint run ./...`
+- **TypeScript**: ESLint and Prettier configured in each app
+
+## Configuration
+
+- **CLI config**: `~/.codepod/config.json` (endpoint, API key)
+- **Server config**: Environment variables or `apps/server/.env`
+- **Build output**: `build/` directory contains all compiled binaries
+- **Docker data**: `docker/data/` for persistent volumes (SQLite)
 
 ## Architecture
 
@@ -74,14 +104,14 @@ make status
 
 | Path | Protocol | Authentication |
 |------|----------|----------------|
-| CLI/SDK → Server | REST API | API Key |
-| Server → Runner | gRPC (mTLS) | Runner Token |
+| CLI/SDK → Server | REST API (port 8080) | API Key |
+| Server → Runner | gRPC (port 50051, mTLS) | Runner Token |
 | User → Agent | SSH | Temporary Token |
 | Agent → Runner | HTTP | Agent Token |
 
 ### Runner Connection Model
 
-Critical: Runners may be behind NAT/firewalls. Server cannot connect to Runners directly. Instead:
+**Critical**: Runners may be behind NAT/firewalls. Server cannot connect to Runners directly. Instead:
 - Server runs as gRPC Server (port 50051)
 - Runners actively connect to Server (reverse tunnel)
 - Server pushes jobs through this established connection
@@ -89,13 +119,14 @@ Critical: Runners may be behind NAT/firewalls. Server cannot connect to Runners 
 ## Core Subsystems
 
 ### Agent (apps/agent/)
-- **Purpose**: SSH Server running as PID 1 in each Sandbox container
+- **Purpose**: SSH Server running as PID 1 in each Sandbox container (handles signal forwarding, zombie reaping)
 - **Key modules**:
   - `pkg/ssh/`: SSH server, session management, PTY
   - `pkg/exec/`: Command executor (shell and direct modes)
   - `pkg/process/`: Process management, zombie reaping, signal forwarding
   - `pkg/tunnel/`: Local/remote/dynamic port forwarding
   - `pkg/reporter/`: Heartbeat and status reporting to Runner
+- **Authentication**: Token (from API), public key (optional), password (disabled by default)
 
 ### Runner (apps/runner/)
 - **Purpose**: Sandbox lifecycle management, Docker operations, job scheduling
@@ -145,3 +176,7 @@ Reference these for implementation details:
 ## Current State
 
 The project is in active implementation. Core components (Agent, Runner, Server, CLI) are built. SDKs are partially implemented. Refer to the Makefile for build targets and current status via `make status`.
+
+## Build Scripts
+
+Custom build and development scripts are located in `scripts/` directory.

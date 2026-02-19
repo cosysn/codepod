@@ -1,5 +1,6 @@
 import * as fs from 'fs';
-import { Client, ConnectConfig, ClientChannel } from 'ssh2';
+import * as path from 'path';
+import { Client, ConnectConfig, ClientChannel, OpenSSHAgent } from 'ssh2';
 import { EventEmitter } from 'events';
 import { sshCertService } from './ssh-ca';
 
@@ -9,7 +10,9 @@ export interface SSHConfig {
   username: string;
   password?: string;
   privateKey?: string;
+  privateKeyPath?: string;
   certificate?: string;
+  certificatePath?: string;
   readyTimeout?: number;
   timeout?: number;
 }
@@ -34,17 +37,50 @@ export class SSHService extends EventEmitter {
   }
 
   /**
+   * Build ssh2 ConnectConfig from SSHConfig
+   */
+  private buildConnectConfig(): ConnectConfig {
+    const cfg: ConnectConfig = {
+      host: this.config.host,
+      port: this.config.port,
+      username: this.config.username,
+      readyTimeout: this.config.readyTimeout,
+      timeout: this.config.timeout,
+    };
+
+    // Use file paths if available, otherwise use inline content
+    if (this.config.certificatePath && this.config.privateKeyPath) {
+      // Use file paths for certificate-based auth
+      // Note: ssh2 types don't include these, but the library supports them
+      (cfg as any).privateKeyPath = this.config.privateKeyPath;
+      (cfg as any).cert = this.config.certificatePath;
+    } else if (this.config.certificate && this.config.privateKey) {
+      // Load from inline content - combine cert after private key
+      // ssh2 expects: private key followed by certificate on new lines
+      cfg.privateKey = `${this.config.privateKey}\n${this.config.certificate}`;
+    } else if (this.config.password) {
+      cfg.password = this.config.password;
+    }
+
+    return cfg;
+  }
+
+  /**
    * Connect to SSH server
    */
   connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.conn = new Client();
 
+      const connectCfg = this.buildConnectConfig();
+
       this.conn.on('ready', () => {
+        console.log('SSH connection ready');
         resolve();
-      }).on('error', (err) => {
+      }).on('error', (err: Error) => {
+        console.error(`SSH connection error: ${err.message}`);
         reject(new Error(`SSH connection failed: ${err.message}`));
-      }).connect(this.config as ConnectConfig);
+      }).connect(connectCfg);
     });
   }
 
@@ -55,7 +91,7 @@ export class SSHService extends EventEmitter {
     host: string,
     port: number,
     username: string,
-    options: { password?: string; privateKey?: string; certificate?: string }
+    options: { password?: string; privateKey?: string; privateKeyPath?: string; certificate?: string; certificatePath?: string }
   ): SSHConfig {
     const config: SSHConfig = {
       host,
@@ -63,10 +99,20 @@ export class SSHService extends EventEmitter {
       username,
     };
 
-    if (options.certificate && options.privateKey) {
-      // Use certificate authentication
-      config.privateKey = options.privateKey;
-      config.certificate = options.certificate;
+    if (options.certificate && (options.privateKey || options.privateKeyPath)) {
+      // Use certificate authentication - prefer file paths for ssh2 library
+      if (options.privateKeyPath) {
+        config.privateKeyPath = options.privateKeyPath;
+      }
+      if (options.certificate) {
+        config.certificate = options.certificate;
+      }
+      if (options.privateKey) {
+        config.privateKey = options.privateKey;
+      }
+      if (options.certificate) {
+        config.certificate = options.certificate;
+      }
     } else if (options.password) {
       // Use password authentication
       config.password = options.password;

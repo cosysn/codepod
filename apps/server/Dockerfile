@@ -4,6 +4,9 @@ FROM node:20-alpine AS builder
 # Install Python and build tools for better-sqlite3
 RUN apk add --no-cache python3 make g++
 
+# Use阿里云 npm 镜像
+RUN npm config set registry https://registry.npmmirror.com
+
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -16,6 +19,8 @@ RUN npm run build
 
 # Production image
 FROM node:20-alpine
+
+# No openssh-client needed - using sshpk library for certificate signing
 
 WORKDIR /app
 

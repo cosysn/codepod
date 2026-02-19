@@ -44,8 +44,9 @@ export class SandboxService {
         ...sandbox,
         token,
       },
-      sshHost: 'localhost',
-      sshPort: 2222,
+      // Note: Actual host/port will be provided by runner via runner-status endpoint
+      sshHost: sandbox.host,
+      sshPort: sandbox.port || 2222,
       sshUser: 'root',
       token,
     };

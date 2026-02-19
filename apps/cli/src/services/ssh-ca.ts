@@ -1,12 +1,12 @@
 /**
  * SSH Certificate Service for CLI
  *
- * Handles generating key pairs and requesting certificates from Server
+ * Handles generating Ed25519 key pairs and requesting certificates from Server
  */
 
-import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as sshpk from 'sshpk';
 
 const CLI_KEY_DIR = path.join(
   process.env.HOME || process.env.USERPROFILE || '.',
@@ -36,20 +36,21 @@ export class SSHCertificateService {
   generateKeyPair(sandboxId: string): KeyPair {
     const keyPath = path.join(this.keyDir, `${sandboxId}_ed25519`);
 
-    // Generate private key
-    const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519', {
-      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
-      publicKeyEncoding: { type: 'spki', format: 'pem' },
-    });
+    // Generate Ed25519 key pair using sshpk
+    const privateKeyObj = sshpk.generatePrivateKey('ed25519');
+    const publicKey = privateKeyObj.toPublic();
 
-    // Save private key
-    fs.writeFileSync(keyPath, privateKey);
-    fs.chmodSync(keyPath, 0o600);
+    // Convert to OpenSSH format for server
+    const opensshPrivateKey = privateKeyObj.toString('openssh');
+    const opensshPublicKey = publicKey.toString('openssh');
+
+    // Save OpenSSH private key
+    fs.writeFileSync(keyPath, opensshPrivateKey, { mode: 0o600 });
 
     // Save public key
-    fs.writeFileSync(`${keyPath}.pub`, publicKey);
+    fs.writeFileSync(`${keyPath}.pub`, opensshPublicKey);
 
-    return { privateKey, publicKey };
+    return { privateKey: opensshPrivateKey, publicKey: opensshPublicKey };
   }
 
   /**
@@ -63,6 +64,9 @@ export class SSHCertificateService {
     const publicKeyPath = path.join(this.keyDir, `${sandboxId}_ed25519.pub`);
     const publicKey = fs.readFileSync(publicKeyPath, 'utf-8');
 
+    // Use base64 encoding to avoid JSON escape issues with newlines
+    const publicKeyBase64 = Buffer.from(publicKey).toString('base64');
+
     const response = await fetch(`${serverUrl}/api/v1/ssh/cert`, {
       method: 'POST',
       headers: {
@@ -70,7 +74,7 @@ export class SSHCertificateService {
         ...(apiKey && { 'X-API-Key': apiKey }),
       },
       body: JSON.stringify({
-        publicKey,
+        publicKey: publicKeyBase64,
         sandboxId,
         validitySeconds: 3600, // 1 hour
       }),

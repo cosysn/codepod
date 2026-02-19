@@ -12,6 +12,7 @@ export interface Sandbox {
   host: string;
   port: number;
   user: string;
+  token?: string;
   sshPort?: number;
   createdAt: string;
   startedAt?: string;

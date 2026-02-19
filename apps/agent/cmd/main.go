@@ -60,11 +60,12 @@ func main() {
 	reporterClient := reporter.NewClient(reporterCfg)
 
 	server := ssh.NewServer(&ssh.ServerConfig{
-		Port:        cfg.SSH.Port,
-		HostKeys:    cfg.SSH.HostKeys,
-		MaxSessions: cfg.SSH.MaxSessions,
-		IdleTimeout: cfg.SSH.IdleTimeout,
-		Token:       cfg.Agent.Token,
+		Port:              cfg.SSH.Port,
+		HostKeys:          cfg.SSH.HostKeys,
+		MaxSessions:       cfg.SSH.MaxSessions,
+		IdleTimeout:       cfg.SSH.IdleTimeout,
+		Token:             cfg.Agent.Token,
+		TrustedUserCAKeys: cfg.SSH.TrustedUserCAKeys,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())

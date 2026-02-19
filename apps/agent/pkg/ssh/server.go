@@ -2,18 +2,168 @@ package ssh
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"golang.org/x/crypto/ssh"
 )
+
+// parseTrustedCAKey parses the trusted CA public key from OpenSSH format
+// and returns it in a format that ssh.ParseAuthorizedKey can handle
+func parseTrustedCAKey(trustedUserCAKeys string) (ssh.PublicKey, error) {
+	// Remove header and footer if present
+	keyContent := strings.TrimSpace(trustedUserCAKeys)
+	lines := strings.Split(keyContent, "\n")
+	var base64Data string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "-----BEGIN") && !strings.HasPrefix(line, "-----END") && line != "" {
+			base64Data += line
+		}
+	}
+
+	// Try to decode base64
+	data, err := base64.StdEncoding.DecodeString(base64Data)
+	if err != nil {
+		// If not base64, try as-is (already binary format)
+		data = []byte(keyContent)
+	}
+
+	// Parse the public key
+	pubKey, _, _, _, err := ssh.ParseAuthorizedKey(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse CA public key: %w", err)
+	}
+
+	return pubKey, nil
+}
+
+// getSignedData returns the bytes that were signed by the CA for a certificate
+// This is the certificate without the signature field
+func getSignedData(cert *ssh.Certificate) []byte {
+	var b []byte
+	b = marshalString(b, cert.Type())
+
+	// Handle nil Nonce field
+	nonce := cert.Nonce
+	if nonce == nil {
+		nonce = []byte{}
+	}
+	b = marshalBytes(b, nonce)
+	b = marshalUint32(b, 0) // reserved field
+
+	// Certificate body
+	body := &certBody{
+		Serial:          cert.Serial,
+		CertType:        cert.CertType,
+		KeyId:           cert.KeyId,
+		ValidPrincipals: cert.ValidPrincipals,
+		ValidAfter:      cert.ValidAfter,
+		ValidBefore:     cert.ValidBefore,
+		CriticalOptions:  cert.CriticalOptions,
+		Extensions:       cert.Extensions,
+		Reserved:        cert.Reserved,
+	}
+	b = marshalCertBody(b, body)
+
+	return b
+}
+
+type certBody struct {
+	Serial          uint64
+	CertType        uint32
+	KeyId           string
+	ValidPrincipals []string
+	ValidAfter      uint64
+	ValidBefore     uint64
+	CriticalOptions map[string]string
+	Extensions      map[string]string
+	Reserved        []byte
+}
+
+func marshalString(b []byte, s string) []byte {
+	b = marshalUint32(b, uint32(len(s)))
+	b = append(b, s...)
+	return b
+}
+
+func marshalBytes(b []byte, data []byte) []byte {
+	b = marshalUint32(b, uint32(len(data)))
+	b = append(b, data...)
+	return b
+}
+
+func marshalUint32(b []byte, v uint32) []byte {
+	var tmp [4]byte
+	binary.BigEndian.PutUint32(tmp[:], v)
+	return append(b, tmp[:]...)
+}
+
+func marshalUint64(b []byte, v uint64) []byte {
+	var tmp [8]byte
+	binary.BigEndian.PutUint64(tmp[:], v)
+	return append(b, tmp[:]...)
+}
+
+func marshalTuple(b []byte, m map[string]string) []byte {
+	b = marshalUint32(b, uint32(len(m)))
+	for k, v := range m {
+		b = marshalString(b, k)
+		b = marshalString(b, v)
+	}
+	return b
+}
+
+func marshalCertBody(b []byte, body *certBody) []byte {
+	b = marshalUint64(b, body.Serial)
+	b = marshalUint32(b, body.CertType)
+	b = marshalString(b, body.KeyId)
+
+	// Handle nil ValidPrincipals
+	validPrincipals := body.ValidPrincipals
+	if validPrincipals == nil {
+		validPrincipals = []string{}
+	}
+	b = marshalUint32(b, uint32(len(validPrincipals)))
+	for _, p := range validPrincipals {
+		b = marshalString(b, p)
+	}
+
+	b = marshalUint64(b, body.ValidAfter)
+	b = marshalUint64(b, body.ValidBefore)
+
+	// Handle nil CriticalOptions
+	criticalOptions := body.CriticalOptions
+	if criticalOptions == nil {
+		criticalOptions = map[string]string{}
+	}
+	b = marshalTuple(b, criticalOptions)
+
+	// Handle nil Extensions
+	extensions := body.Extensions
+	if extensions == nil {
+		extensions = map[string]string{}
+	}
+	b = marshalTuple(b, extensions)
+
+	// Handle nil Reserved
+	reserved := body.Reserved
+	if reserved == nil {
+		reserved = []byte{}
+	}
+	b = marshalBytes(b, reserved)
+	return b
+}
 
 type ServerConfig struct {
 	Port             int
@@ -92,28 +242,50 @@ func (s *SSHServer) isShuttingDown() bool {
 func (s *SSHServer) handleConnection(conn net.Conn) {
 	serverConfig := &ssh.ServerConfig{}
 
-	// Configure authentication based on whether CA public key is available
+	// Try to configure certificate-based authentication
+	var caPublicKey ssh.PublicKey
 	if s.config.TrustedUserCAKeys != "" {
-		// Use certificate-based authentication
-		log.Printf("Using certificate authentication with CA key")
-
-		// Parse the trusted CA public key
-		// Note: Certificate signature verification is handled by the SSH handshake
-		// The CA public key is used to verify that the certificate was signed by the trusted CA
-		_, _, _, _, err := ssh.ParseAuthorizedKey([]byte(s.config.TrustedUserCAKeys))
+		log.Printf("Configuring certificate authentication with CA key")
+		var err error
+		caPublicKey, err = parseTrustedCAKey(s.config.TrustedUserCAKeys)
 		if err != nil {
-			log.Printf("Warning: failed to parse CA public key: %v", err)
+			log.Printf("WARNING: failed to parse CA public key: %v, falling back to token auth", err)
 		} else {
+			log.Printf("CA public key parsed successfully: %s", caPublicKey.Type())
 			serverConfig.PublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+				// Recover from any panics during certificate processing
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("WARNING: recovered from panic during certificate processing: %v", r)
+					}
+				}()
+
 				// Verify it's a certificate
 				cert, ok := key.(*ssh.Certificate)
 				if !ok {
 					return nil, fmt.Errorf("expected certificate, got public key")
 				}
 
+				log.Printf("DEBUG: Received CertType: %v, KeyId: %s", cert.CertType, cert.KeyId)
+
 				// Check certificate type (must be user certificate)
 				if cert.CertType != ssh.UserCert {
 					return nil, fmt.Errorf("expected user certificate, got %v", cert.CertType)
+				}
+
+				// Check if signature is present
+				if cert.Signature == nil {
+					return nil, fmt.Errorf("certificate has no signature")
+				}
+
+				// Verify the certificate was signed by our CA
+				// The signed data is the certificate without the signature
+				signedData := getSignedData(cert)
+
+				log.Printf("DEBUG: signedData length: %d", len(signedData))
+
+				if err := caPublicKey.Verify(signedData, cert.Signature); err != nil {
+					return nil, fmt.Errorf("certificate not signed by trusted CA: %v", err)
 				}
 
 				// Check validity period
@@ -125,8 +297,8 @@ func (s *SSHServer) handleConnection(conn net.Conn) {
 					return nil, fmt.Errorf("certificate has expired")
 				}
 
-				log.Printf("Certificate from %s: serial=%d, keyId=%s",
-					conn.User(), cert.Serial, cert.KeyId)
+				log.Printf("Certificate authenticated for user: %s, keyId: %s",
+					conn.User(), cert.KeyId)
 
 				return &ssh.Permissions{
 					CriticalOptions: cert.CriticalOptions,
@@ -134,15 +306,15 @@ func (s *SSHServer) handleConnection(conn net.Conn) {
 				}, nil
 			}
 		}
-	} else {
-		// Fall back to token-based authentication
-		log.Printf("Using token-based authentication")
-		serverConfig.PasswordCallback = func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
-			if string(password) == s.config.Token {
-				return &ssh.Permissions{}, nil
-			}
-			return nil, fmt.Errorf("invalid password")
+	}
+
+	// Token-based authentication (fallback - works even with CA auth configured)
+	log.Printf("Enabling token-based authentication as fallback")
+	serverConfig.PasswordCallback = func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
+		if string(password) == s.config.Token {
+			return &ssh.Permissions{}, nil
 		}
+		return nil, fmt.Errorf("invalid password")
 	}
 
 	// Add host keys
@@ -207,7 +379,7 @@ func (s *SSHServer) handleSession(channel ssh.Channel, requests <-chan *ssh.Requ
 				return
 			}
 
-			log.Printf("Received request type: %s", req.Type)
+			log.Printf("DEBUG: Received request type: %s", req.Type)
 
 			switch req.Type {
 			case "shell":

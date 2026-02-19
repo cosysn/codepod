@@ -49,9 +49,12 @@ cd "$PROJECT_ROOT"
 echo "[6/6] Building and restarting Docker services..."
 cd docker
 
-# Stop existing containers
+# Stop existing containers (including sandboxes)
 echo "Stopping existing containers..."
 docker-compose down 2>/dev/null || true
+
+# Remove any leftover sandbox containers
+docker ps -a --filter "name=sbox-" -q | xargs -r docker rm -f 2>/dev/null || true
 
 # Build images
 echo "Building Docker images..."

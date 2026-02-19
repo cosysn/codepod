@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -203,6 +204,7 @@ type SandboxStatusUpdate struct {
 	Status      string `json:"status"`
 	ContainerID string `json:"containerId,omitempty"`
 	Port        int    `json:"port,omitempty"`
+	Host        string `json:"host,omitempty"`
 	Message     string `json:"message,omitempty"`
 }
 
@@ -258,13 +260,11 @@ func (c *GrpcClient) GetSSHCAPublicKey(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("server returned status %d", resp.StatusCode)
 	}
 
-	var result struct {
-		PublicKey string `json:"publicKey"`
+	// Read response as plain text (the server returns the key without JSON wrapping)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return result.PublicKey, nil
+	return string(body), nil
 }

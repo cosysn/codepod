@@ -2,6 +2,7 @@ package runner
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log"
 	"time"
@@ -113,6 +114,15 @@ func (r *Runner) GetClient() *GrpcClient {
 	return r.client
 }
 
+// getHost returns the host address for SSH connections
+// Uses configured host if set, otherwise defaults to localhost
+func (r *Runner) getHost() string {
+	if r.cfg.Runner.Host != "" {
+		return r.cfg.Runner.Host
+	}
+	return "localhost"
+}
+
 // processJobs polls for jobs and processes them
 func (r *Runner) processJobs(ctx context.Context) {
 	ticker := time.NewTicker(5 * time.Second)
@@ -193,6 +203,7 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 				Status:      "running",
 				ContainerID: existingSandbox.ContainerID,
 				Port:        existingSandbox.Port,
+				Host:        r.getHost(),
 				Message:     "Sandbox already running",
 			}); err != nil {
 				log.Printf("Warning: failed to report running status: %v", err)
@@ -214,6 +225,7 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 				Status:      "running",
 				ContainerID: existingSandbox.ContainerID,
 				Port:        existingSandbox.Port,
+				Host:        r.getHost(),
 				Message:     "Sandbox started",
 			}); err != nil {
 				log.Printf("Warning: failed to report running status: %v", err)
@@ -257,9 +269,9 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 		"AGENT_SERVER_URL": r.cfg.Server.URL,
 	}
 
-	// Add CA public key if available
+	// Add CA public key if available (base64 encoded to avoid newline issues in env vars)
 	if caPublicKey != "" {
-		env["AGENT_TRUSTED_USER_CA_KEYS"] = caPublicKey
+		env["AGENT_TRUSTED_USER_CA_KEYS"] = base64.StdEncoding.EncodeToString([]byte(caPublicKey))
 	}
 
 	// Merge job-specific environment variables
@@ -317,6 +329,7 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 		Status:      "running",
 		ContainerID: sb.ContainerID,
 		Port:        sb.Port,
+		Host:        r.getHost(),
 		Message:     "Sandbox running",
 	}); err != nil {
 		log.Printf("Warning: failed to report running status: %v", err)

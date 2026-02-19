@@ -39,6 +39,7 @@ type DockerConfig struct {
 type RunnerConfig struct {
 	ID      string
 	MaxJobs int
+	Host    string // Network address for SSH connections (e.g., IP or hostname)
 }
 
 // LoggingConfig holds logging settings
@@ -118,6 +119,8 @@ func Load(path string) (*Config, error) {
 				cfg.Runner.ID = value
 			case "max_jobs":
 				cfg.Runner.MaxJobs, _ = strconv.Atoi(value)
+			case "host":
+				cfg.Runner.Host = value
 			}
 		case "logging":
 			switch key {
@@ -192,6 +195,7 @@ func LoadFromEnv() *Config {
 		Runner: RunnerConfig{
 			ID:      os.Getenv("CODEPOD_RUNNER_ID"),
 			MaxJobs: getEnvIntOrDefault("CODEPOD_MAX_JOBS", 10),
+			Host:    os.Getenv("CODEPOD_RUNNER_HOST"),
 		},
 		Agent: AgentConfig{
 			BinaryPath: getEnvOrDefault("CODEPOD_AGENT_BINARY_PATH", ""),
