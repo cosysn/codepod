@@ -140,6 +140,7 @@ export interface JobData {
   type: string;
   sandboxId: string;
   image: string;
+  token: string;
   status: string;
   runnerId?: string;
   createdAt: string;
@@ -162,8 +163,8 @@ export class JobRepository {
     const now = new Date().toISOString();
 
     const stmt = database.prepare(`
-      INSERT INTO jobs (id, type, sandbox_id, image, status, runner_id, created_at, env, memory, cpu, network_mode)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO jobs (id, type, sandbox_id, image, token, status, runner_id, created_at, env, memory, cpu, network_mode)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -171,6 +172,7 @@ export class JobRepository {
       data.type,
       data.sandboxId,
       data.image,
+      data.token || null,
       'pending',
       null,
       now,
@@ -237,6 +239,7 @@ export class JobRepository {
       type: row.type,
       sandboxId: row.sandbox_id,
       image: row.image,
+      token: row.token || '',
       status: row.status,
       runnerId: row.runner_id || undefined,
       createdAt: row.created_at,

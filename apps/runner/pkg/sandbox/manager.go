@@ -97,14 +97,16 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 		Memory:     memory,
 		CPUPeriod:  100000,
 		CPUShares:  int64(opts.CPU * 1024),
-		NetworkMode: opts.NetworkMode,
 		// Publish SSH port (22) to host
 		Ports: []docker.PortBinding{
 			{ContainerPort: 22, HostPort: 0, Protocol: "tcp"},
 		},
 	}
-	if opts.NetworkMode == "" {
+	// Use provided network mode or default to bridge
+	if opts.NetworkMode == "" || opts.NetworkMode == "bridge" {
 		config.NetworkMode = "bridge"
+	} else {
+		config.NetworkMode = opts.NetworkMode
 	}
 
 	if needsAgentInjection {
@@ -163,6 +165,23 @@ func (m *Manager) Start(ctx context.Context, sb *Sandbox) error {
 
 	sb.Status = SandboxStatusRunning
 	sb.StartedAt = time.Now()
+
+	// Query Docker for the actual SSH port
+	containerInfo, err := m.docker.ListContainers(ctx, false)
+	if err == nil {
+		for _, c := range containerInfo {
+			if c.ID == sb.ContainerID {
+				for _, p := range c.Ports {
+					if p.ContainerPort == 22 && p.Protocol == "tcp" {
+						sb.Port = p.HostPort
+						break
+					}
+				}
+				break
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -272,6 +291,44 @@ func (m *Manager) Get(ctx context.Context, id string) (*Sandbox, error) {
 	}
 
 	return nil, fmt.Errorf("sandbox not found: %s", id)
+}
+
+// GetByName gets a sandbox by container name
+func (m *Manager) GetByName(ctx context.Context, name string) (*Sandbox, error) {
+	containers, err := m.docker.ListContainers(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, c := range containers {
+		for _, n := range c.Names {
+			// Remove leading slash
+			if len(n) > 0 && n[0] == '/' {
+				n = n[1:]
+			}
+			if n == name {
+				// Extract SSH port (22) from port bindings
+				port := 0
+				for _, p := range c.Ports {
+					if p.ContainerPort == 22 && p.Protocol == "tcp" {
+						port = p.HostPort
+						break
+					}
+				}
+
+				return &Sandbox{
+					ID:          c.ID,
+					Name:        n,
+					ContainerID: c.ID,
+					Image:       c.Image,
+					Status:      SandboxStatus(c.State),
+					Port:        port,
+				}, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("sandbox not found: %s", name)
 }
 
 // parseMemory parses memory string to bytes

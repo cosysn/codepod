@@ -19,7 +19,6 @@ apps/agent/agent
 apps/runner/runner
 apps/server/dist
 apps/cli/dist
-bin/
 
 # Logs
 *.log

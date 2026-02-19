@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"os/exec"
 	"sync"
 	"syscall"
@@ -96,6 +97,23 @@ func (s *SSHServer) handleConnection(conn net.Conn) {
 		},
 	}
 
+	// Add host keys
+	log.Printf("Loading host keys from: %v", s.config.HostKeys)
+	hostKeyCount := 0
+	for _, keyPath := range s.config.HostKeys {
+		key, err := loadHostKey(keyPath)
+		if err != nil {
+			log.Printf("Warning: failed to load host key %s: %v", keyPath, err)
+			continue
+		}
+		log.Printf("Successfully loaded host key: %s", keyPath)
+		serverConfig.AddHostKey(key)
+		hostKeyCount++
+	}
+	if hostKeyCount == 0 {
+		log.Printf("WARNING: No host keys loaded! SSH server will not be able to accept connections.")
+	}
+
 	sshConn, chans, reqs, err := ssh.NewServerConn(conn, serverConfig)
 	if err != nil {
 		log.Printf("Failed to establish SSH connection: %v", err)
@@ -131,40 +149,61 @@ func (s *SSHServer) handleSession(channel ssh.Channel, requests <-chan *ssh.Requ
 	var cols uint16 = 80
 	var rows uint16 = 24
 
-	select {
-	case req, ok := <-requests:
-		if !ok {
-			channel.Close()
-			return
-		}
-		switch req.Type {
-		case "shell":
-			// Interactive shell session
-			sessionType = SessionTypeInteractive
-			req.Reply(true, nil)
-		case "exec":
-			// Single command execution
-			var execReq execRequest
-			if err := ssh.Unmarshal(req.Payload, &execReq); err == nil {
-				command = execReq.Command
-				sessionType = SessionTypeExec
+	// Process requests until we have enough info to start the session
+	for {
+		select {
+		case req, ok := <-requests:
+			if !ok {
+				log.Printf("Session channel closed for user: %s", user)
+				channel.Close()
+				return
 			}
-			req.Reply(true, nil)
-		case "pty-req":
-			// PTY request with window size
-			var ptyReq ptyRequest
-			if err := ssh.Unmarshal(req.Payload, &ptyReq); err == nil {
-				cols = ptyReq.Columns
-				rows = ptyReq.Rows
+
+			log.Printf("Received request type: %s", req.Type)
+
+			switch req.Type {
+			case "shell":
+				// Interactive shell session
 				sessionType = SessionTypeInteractive
+				log.Printf("Starting interactive shell for user: %s", user)
+				req.Reply(true, nil)
+				// Break out to create session
+				goto createSession
+			case "exec":
+				// Single command execution
+				var execReq execRequest
+				if err := ssh.Unmarshal(req.Payload, &execReq); err == nil {
+					command = execReq.Command
+					sessionType = SessionTypeExec
+					log.Printf("Executing command for user %s: %s", user, command)
+				}
+				req.Reply(true, nil)
+				// Break out to create session
+				goto createSession
+			case "env":
+				// Environment variable request - just acknowledge it
+				log.Printf("Received env request from user: %s", user)
+				req.Reply(true, nil)
+				// Continue to wait for more requests
+			case "pty-req":
+				// PTY request with window size
+				var ptyReq ptyRequest
+				if err := ssh.Unmarshal(req.Payload, &ptyReq); err == nil {
+					cols = ptyReq.Columns
+					rows = ptyReq.Rows
+					sessionType = SessionTypeInteractive
+					log.Printf("PTY requested: cols=%d, rows=%d", cols, rows)
+				}
+				req.Reply(true, nil)
+				// Continue to wait for more requests
+			default:
+				log.Printf("Unknown request type: %s", req.Type)
+				req.Reply(true, nil)
 			}
-			req.Reply(true, nil)
-		default:
-			req.Reply(false, nil)
 		}
-	default:
-		// No request, assume shell
 	}
+
+createSession:
 
 	// Create session
 	session, err := s.sessionMgr.Create(&SessionConfig{
@@ -242,25 +281,37 @@ func (s *SSHServer) handleExec(channel ssh.Channel, session *Session, command st
 	defer s.sessionMgr.Close(session.ID)
 	defer channel.Close()
 
+	log.Printf("Executing command: %s", command)
+
 	// Execute command without PTY
 	cmd := exec.Command("/bin/sh", "-c", command)
 	output, err := cmd.Output()
+
+	// Send exit status first
+	var exitCode int
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
-			channel.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{
-				ExitStatus: uint32(exitErr.ExitCode()),
-			}))
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
 		}
-		log.Printf("Exec failed: %v", err)
-		return
+		log.Printf("Exec command '%s' failed with exit code %d: %v", command, exitCode, err)
+	} else {
+		exitCode = 0
+		log.Printf("Exec command '%s' succeeded", command)
 	}
 
-	channel.Write(output)
+	// Send exit status
 	channel.SendRequest("exit-status", false, ssh.Marshal(&exitStatusMsg{
-		ExitStatus: 0,
+		ExitStatus: uint32(exitCode),
 	}))
 
-	log.Printf("Exec completed: %s", command)
+	// Send output if any
+	if err == nil && len(output) > 0 {
+		channel.Write(output)
+	}
+
+	log.Printf("Exec completed: %s (exit code: %d)", command, exitCode)
 }
 
 type ptyRequest struct {
@@ -312,4 +363,17 @@ func (s *SSHServer) Stop() error {
 	}
 	s.listeners = nil
 	return nil
+}
+
+// loadHostKey loads an SSH private key file
+func loadHostKey(path string) (ssh.Signer, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read key file: %w", err)
+	}
+	signer, err := ssh.ParsePrivateKey(data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse key: %w", err)
+	}
+	return signer, nil
 }

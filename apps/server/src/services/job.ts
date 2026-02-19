@@ -20,6 +20,7 @@ export interface Job {
   type: 'create' | 'delete';
   sandboxId: string;
   image: string;
+  token: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   runnerId?: string;
   createdAt: string;
@@ -40,6 +41,7 @@ export function createJob(data: Omit<Job, 'id' | 'status' | 'createdAt'>): Job {
     type: job.type as 'create' | 'delete',
     sandboxId: job.sandboxId,
     image: job.image,
+    token: job.token,
     status: job.status as 'pending' | 'running' | 'completed' | 'failed',
     runnerId: job.runnerId,
     createdAt: job.createdAt,
@@ -62,6 +64,7 @@ export function getJob(id: string): Job | undefined {
     type: job.type as 'create' | 'delete',
     sandboxId: job.sandboxId,
     image: job.image,
+    token: job.token,
     status: job.status as 'pending' | 'running' | 'completed' | 'failed',
     runnerId: job.runnerId,
     createdAt: job.createdAt,
@@ -82,6 +85,7 @@ export function getPendingJobs(runnerId?: string): Job[] {
     type: job.type as 'create' | 'delete',
     sandboxId: job.sandboxId,
     image: job.image,
+    token: job.token,
     status: job.status as 'pending' | 'running' | 'completed' | 'failed',
     runnerId: job.runnerId,
     createdAt: job.createdAt,
@@ -118,6 +122,7 @@ export function getAllJobs(): Job[] {
     type: job.type as 'create' | 'delete',
     sandboxId: job.sandboxId,
     image: job.image,
+    token: job.token,
     status: job.status as 'pending' | 'running' | 'completed' | 'failed',
     runnerId: job.runnerId,
     createdAt: job.createdAt,

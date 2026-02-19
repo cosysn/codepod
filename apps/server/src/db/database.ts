@@ -41,6 +41,7 @@ export class SqliteDB {
         type TEXT NOT NULL,
         sandbox_id TEXT,
         image TEXT NOT NULL,
+        token TEXT,
         status TEXT NOT NULL DEFAULT 'pending',
         runner_id TEXT,
         created_at TEXT NOT NULL,

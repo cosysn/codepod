@@ -1,19 +1,10 @@
-# apps/agent/Dockerfile
-FROM golang:1.21-alpine AS builder
-
-WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o agent ./cmd
-
+# Lightweight agent Dockerfile - uses pre-built binary
 FROM alpine:3.19
 
 RUN apk add --no-cache openssh-server ca-certificates tzdata bash
 
 WORKDIR /app
-COPY --from=builder /app/agent /app/agent
+COPY bin/agent /app/agent
 
 RUN mkdir -p /etc/ssh && \
     ssh-keygen -A && \

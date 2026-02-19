@@ -1,6 +1,9 @@
 # Server Dockerfile
 FROM node:20-alpine AS builder
 
+# Install Python and build tools for better-sqlite3
+RUN apk add --no-cache python3 make g++
+
 WORKDIR /app
 
 COPY package.json package-lock.json* ./

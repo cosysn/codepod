@@ -15,6 +15,7 @@ type Job struct {
 	Type        string            `json:"type"`
 	SandboxID   string            `json:"sandboxId"`
 	Image       string            `json:"image"`
+	Token       string            `json:"token"`
 	Status      string            `json:"status"`
 	RunnerID    string            `json:"runnerId,omitempty"`
 	Env         map[string]string `json:"env,omitempty"`

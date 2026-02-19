@@ -358,6 +358,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         type: data.type as 'create' | 'delete',
         sandboxId: data.sandboxId as string,
         image: data.image as string,
+        token: data.token as string || '',
       });
       sendJson(res, 201, { job });
       return;
