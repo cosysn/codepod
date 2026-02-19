@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/codepod/codepod/apps/runner/pkg/config"
@@ -356,13 +357,35 @@ func (r *Runner) handleDeleteJob(ctx context.Context, job *Job) error {
 		log.Printf("Warning: failed to report deleting status: %v", err)
 	}
 
-	// Try to find the sandbox
-	sb, err := r.sandbox.Get(ctx, job.SandboxID)
+	// Try to find the sandbox by name (not by container ID)
+	sb, err := r.sandbox.GetByName(ctx, job.SandboxID)
 	if err != nil {
-		// Sandbox not found - may have already been deleted
-		log.Printf("Sandbox %s not found, marking job as complete", job.SandboxID)
-		r.client.CompleteJob(ctx, job.ID, true, "Sandbox not found (may already be deleted)")
-		return nil
+		// Debug: list all containers to see what's available
+		containers, listErr := r.sandbox.List(ctx)
+		if listErr == nil {
+			log.Printf("Available sandboxes:")
+			for _, s := range containers {
+				log.Printf("  - ID: %s, Name: %s, ContainerID: %s", s.ID, s.Name, s.ContainerID)
+			}
+		}
+
+		// Sandbox not found - try to find by container ID prefix
+		log.Printf("Sandbox %s not found by name, trying by label", job.SandboxID)
+		for _, s := range containers {
+			if strings.HasPrefix(s.ContainerID, job.SandboxID) || strings.Contains(job.SandboxID, s.ID) {
+				log.Printf("Found matching sandbox by ID: %s", s.Name)
+				sb = s
+				err = nil
+				break
+			}
+		}
+
+		if err != nil {
+			// Sandbox not found - may have already been deleted
+			log.Printf("Sandbox %s not found, marking job as complete", job.SandboxID)
+			r.client.CompleteJob(ctx, job.ID, true, "Sandbox not found (may already be deleted)")
+			return nil
+		}
 	}
 
 	// Stop the sandbox
