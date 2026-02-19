@@ -8,6 +8,7 @@ import { createJob, getPendingJobs, assignJob, getAllJobs } from './services/job
 import { store } from './db/store';
 import { Sandbox, CreateSandboxRequest, ErrorResponse, SandboxStatus } from './types';
 import { GrpcServer } from './grpc/server';
+import { sshCAService } from './services/ssh-ca';
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -386,6 +387,60 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
 
+    // SSH CA routes
+    // Get CA public key (for agent configuration)
+    if (path === '/api/v1/ssh/ca' && method === 'GET') {
+      try {
+        const caPublicKey = sshCAService.getCAPublicKey();
+        sendJson(res, 200, { publicKey: caPublicKey });
+      } catch (e) {
+        sendError(res, 500, 'Failed to get CA public key', String(e));
+      }
+      return;
+    }
+
+    // Sign public key to create certificate
+    if (path === '/api/v1/ssh/cert' && method === 'POST') {
+      const body = await parseBody(req);
+      const data = body as Record<string, unknown>;
+
+      console.log('Received cert request:', JSON.stringify(data));
+
+      const publicKeyPem = data.publicKey as string;
+      const sandboxId = data.sandboxId as string;
+      const validitySeconds = (data.validitySeconds as number) || 3600;
+
+      if (!publicKeyPem) {
+        sendError(res, 400, 'Missing publicKey');
+        return;
+      }
+
+      if (!sandboxId) {
+        sendError(res, 400, 'Missing sandboxId');
+        return;
+      }
+
+      // Verify sandbox exists and user has access
+      const sandbox = store.getSandbox(sandboxId);
+      if (!sandbox) {
+        sendError(res, 404, 'Sandbox not found');
+        return;
+      }
+
+      try {
+        const certificate = await sshCAService.signPublicKey(
+          publicKeyPem,
+          sandboxId,
+          'root',
+          validitySeconds
+        );
+        sendJson(res, 200, { certificate });
+      } catch (e) {
+        sendError(res, 500, 'Failed to sign certificate', String(e));
+      }
+      return;
+    }
+
     // 404 for unknown routes
     sendError(res, 404, 'Not found');
   } catch (error) {
@@ -395,14 +450,18 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 }
 
 // Create and start server
-export function createServer(): { server: ReturnType<typeof httpCreateServer>; start: () => void } {
+export function createServer(): { server: ReturnType<typeof httpCreateServer>; start: () => Promise<void> } {
   const server = httpCreateServer(handleRequest);
 
-  // Create and start gRPC server
-  grpcServer = new GrpcServer(50051);
-  grpcServer.start().catch(console.error);
+  const start = async (): Promise<void> => {
+    // Initialize SSH CA
+    await sshCAService.initialize();
+    console.log('SSH CA initialized');
 
-  const start = (): void => {
+    // Create and start gRPC server
+    grpcServer = new GrpcServer(50051);
+    grpcServer.start().catch(console.error);
+
     server.listen(PORT, HOST, () => {
       console.log(`CodePod Server running at http://${HOST}:${PORT}`);
     });

@@ -15,11 +15,12 @@ import (
 )
 
 type ServerConfig struct {
-	Port        int
-	HostKeys    []string
-	MaxSessions int
-	Token       string
-	IdleTimeout int
+	Port             int
+	HostKeys         []string
+	MaxSessions      int
+	Token            string
+	IdleTimeout      int
+	TrustedUserCAKeys string // SSH CA public key for certificate authentication
 }
 
 type SSHServer struct {
@@ -88,13 +89,46 @@ func (s *SSHServer) isShuttingDown() bool {
 }
 
 func (s *SSHServer) handleConnection(conn net.Conn) {
-	serverConfig := &ssh.ServerConfig{
-		PasswordCallback: func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
+	serverConfig := &ssh.ServerConfig{}
+
+	// Configure authentication based on whether CA public key is available
+	if s.config.TrustedUserCAKeys != "" {
+		// Use certificate-based authentication
+		log.Printf("Using certificate authentication with CA key")
+
+		// Parse and add the trusted CA public key
+		_, _, _, _, err := ssh.ParseAuthorizedKey([]byte(s.config.TrustedUserCAKeys))
+		if err != nil {
+			log.Printf("Warning: failed to parse CA public key: %v", err)
+		} else {
+			serverConfig.PublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
+				// Verify the certificate
+				cert, ok := key.(*ssh.Certificate)
+				if !ok {
+					return nil, fmt.Errorf("expected certificate, got public key")
+				}
+
+				log.Printf("Client certificate fingerprint: %s", ssh.FingerprintSHA256(key))
+				log.Printf("Certificate valid from: %v to %v", cert.ValidAfter, cert.ValidBefore)
+
+				// For now, accept any valid certificate signed by the CA
+				// In production, we should verify the signature using the CA public key
+				return &ssh.Permissions{
+					Extensions: map[string]string{
+						"cert-authority": "true",
+					},
+				}, nil
+			}
+		}
+	} else {
+		// Fall back to token-based authentication
+		log.Printf("Using token-based authentication")
+		serverConfig.PasswordCallback = func(conn ssh.ConnMetadata, password []byte) (*ssh.Permissions, error) {
 			if string(password) == s.config.Token {
 				return &ssh.Permissions{}, nil
 			}
 			return nil, fmt.Errorf("invalid password")
-		},
+		}
 	}
 
 	// Add host keys

@@ -3,9 +3,16 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"log"
 	"os"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 
 	"github.com/codepod/codepod/apps/runner/pkg/docker"
 )
@@ -142,6 +149,11 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 		// Copy binary to container
 		if err := m.docker.CopyFileToContainer(ctx, containerID, "/tmp/agent", bytes.NewReader(binaryContent)); err != nil {
 			return nil, fmt.Errorf("failed to copy agent binary to container: %w", err)
+		}
+
+		// Generate and copy SSH host keys for the agent
+		if err := m.generateAndCopySSHHostKeys(ctx, containerID); err != nil {
+			log.Printf("Warning: failed to generate SSH host keys: %v", err)
 		}
 	}
 
@@ -374,4 +386,38 @@ func parseMemory(mem string) (int64, error) {
 	}
 
 	return value * multiplier, nil
+}
+
+// generateAndCopySSHHostKeys generates SSH host keys and copies them to the container
+func (m *Manager) generateAndCopySSHHostKeys(ctx context.Context, containerID string) error {
+	// Generate RSA host key
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return fmt.Errorf("failed to generate RSA key: %w", err)
+	}
+
+	// Convert to PEM format
+	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
+	})
+
+	// Get public key in SSH format
+	publicKey, err := ssh.NewPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return fmt.Errorf("failed to create SSH public key: %w", err)
+	}
+	publicKeySSH := ssh.MarshalAuthorizedKey(publicKey)
+
+	// Copy private key to container
+	if err := m.docker.CopyFileToContainer(ctx, containerID, "/etc/ssh/ssh_host_rsa_key", bytes.NewReader(privateKeyPEM)); err != nil {
+		return fmt.Errorf("failed to copy SSH private key: %w", err)
+	}
+
+	// Copy public key to container
+	if err := m.docker.CopyFileToContainer(ctx, containerID, "/etc/ssh/ssh_host_rsa_key.pub", bytes.NewReader(publicKeySSH)); err != nil {
+		return fmt.Errorf("failed to copy SSH public key: %w", err)
+	}
+
+	return nil
 }

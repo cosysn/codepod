@@ -7,4 +7,4 @@ import { createServer } from './server';
 const { start } = createServer();
 
 console.log('Starting CodePod Server...');
-start();
+start().catch(console.error);

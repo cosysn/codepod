@@ -243,11 +243,23 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 		agentToken = uuid.New().String()
 	}
 
+	// Fetch SSH CA public key from server for certificate authentication
+	caPublicKey, err := r.client.GetSSHCAPublicKey(ctx)
+	if err != nil {
+		log.Printf("Warning: failed to fetch SSH CA public key: %v", err)
+		// Continue without CA key - will fall back to token auth
+	}
+
 	// Build environment variables
 	env := map[string]string{
 		"AGENT_TOKEN":      agentToken,
 		"AGENT_SANDBOX_ID": job.SandboxID,
 		"AGENT_SERVER_URL": r.cfg.Server.URL,
+	}
+
+	// Add CA public key if available
+	if caPublicKey != "" {
+		env["AGENT_TRUSTED_USER_CA_KEYS"] = caPublicKey
 	}
 
 	// Merge job-specific environment variables

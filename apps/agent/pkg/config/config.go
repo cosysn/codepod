@@ -22,10 +22,11 @@ type AgentConfig struct {
 
 // SSHConfig holds SSH server settings
 type SSHConfig struct {
-	Port        int
-	HostKeys    []string
-	MaxSessions int
-	IdleTimeout int
+	Port             int
+	HostKeys         []string
+	MaxSessions      int
+	IdleTimeout      int
+	TrustedUserCAKeys string // SSH CA public key for certificate authentication
 }
 
 func Load() (*Config, error) {
@@ -51,6 +52,9 @@ func LoadFromEnv() *Config {
 		hostKeys = parseHostKeys(hostKeysEnv)
 	}
 
+	// Get CA public key from environment (for certificate authentication)
+	trustedUserCAKeys := os.Getenv("AGENT_TRUSTED_USER_CA_KEYS")
+
 	return &Config{
 		Agent: AgentConfig{
 			Token:     os.Getenv("AGENT_TOKEN"),
@@ -58,10 +62,11 @@ func LoadFromEnv() *Config {
 			SandboxID: os.Getenv("AGENT_SANDBOX_ID"),
 		},
 		SSH: SSHConfig{
-			Port:        getEnvIntOrDefault("AGENT_SSH_PORT", 22),
-			HostKeys:    hostKeys,
-			MaxSessions: getEnvIntOrDefault("AGENT_MAX_SESSIONS", 10),
-			IdleTimeout: getEnvIntOrDefault("AGENT_IDLE_TIMEOUT", 1800),
+			Port:             getEnvIntOrDefault("AGENT_SSH_PORT", 22),
+			HostKeys:         hostKeys,
+			MaxSessions:      getEnvIntOrDefault("AGENT_MAX_SESSIONS", 10),
+			IdleTimeout:      getEnvIntOrDefault("AGENT_IDLE_TIMEOUT", 1800),
+			TrustedUserCAKeys: trustedUserCAKeys,
 		},
 	}
 }

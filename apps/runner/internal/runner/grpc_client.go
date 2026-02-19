@@ -237,3 +237,34 @@ func (c *GrpcClient) UpdateSandboxStatus(ctx context.Context, sandboxID string, 
 
 	return nil
 }
+
+// GetSSHCAPublicKey fetches the SSH CA public key from the server
+func (c *GrpcClient) GetSSHCAPublicKey(ctx context.Context) (string, error) {
+	serverURL := strings.TrimRight(c.config.ServerURL, "/")
+	url := fmt.Sprintf("%s/api/v1/ssh/ca", serverURL)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch CA public key: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	var result struct {
+		PublicKey string `json:"publicKey"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return result.PublicKey, nil
+}

@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -14,8 +15,33 @@ import (
 	"github.com/codepod/codepod/apps/agent/pkg/ssh"
 )
 
+// generateSSHHostKeys generates SSH host keys if they don't exist
+func generateSSHHostKeys() error {
+	keyPath := "/etc/ssh/ssh_host_rsa_key"
+	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+		log.Println("Generating SSH host keys...")
+
+		// Ensure /etc/ssh directory exists
+		if err := os.MkdirAll("/etc/ssh", 0755); err != nil {
+			return err
+		}
+
+		// Generate RSA key
+		if err := exec.Command("ssh-keygen", "-A").Run(); err != nil {
+			return err
+		}
+		log.Println("SSH host keys generated")
+	}
+	return nil
+}
+
 func main() {
 	log.Println("Starting CodePod Agent...")
+
+	// Generate SSH host keys if needed
+	if err := generateSSHHostKeys(); err != nil {
+		log.Printf("Warning: failed to generate SSH host keys: %v", err)
+	}
 
 	cfg := config.LoadFromEnv()
 

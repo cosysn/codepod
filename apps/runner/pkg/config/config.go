@@ -20,6 +20,7 @@ type Config struct {
 type AgentConfig struct {
 	BinaryPath string // Path to the agent binary
 	Token      string // Default token for agent authentication
+	HostKeys   string // Path to SSH host keys directory
 }
 
 // ServerConfig holds Server connection settings
