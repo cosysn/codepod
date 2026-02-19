@@ -60,7 +60,7 @@ export class Formatter {
 
     const headers = ['ID', 'Name', 'Status', 'Image', 'Created'];
     const rows = sandboxes.map(s => [
-      s.id.substring(0, 8),
+      s.id,
       s.name,
       s.status,
       s.image,
