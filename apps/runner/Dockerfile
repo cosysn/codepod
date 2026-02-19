@@ -46,6 +46,7 @@ RUN apk add --no-cache \
     docker-cli \
     ca-certificates \
     bind-tools \
+    openssh-client \
     && rm -rf /var/cache/apk/*
 
 WORKDIR /app

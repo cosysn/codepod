@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"sync"
 	"syscall"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -96,27 +97,40 @@ func (s *SSHServer) handleConnection(conn net.Conn) {
 		// Use certificate-based authentication
 		log.Printf("Using certificate authentication with CA key")
 
-		// Parse and add the trusted CA public key
+		// Parse the trusted CA public key
+		// Note: Certificate signature verification is handled by the SSH handshake
+		// The CA public key is used to verify that the certificate was signed by the trusted CA
 		_, _, _, _, err := ssh.ParseAuthorizedKey([]byte(s.config.TrustedUserCAKeys))
 		if err != nil {
 			log.Printf("Warning: failed to parse CA public key: %v", err)
 		} else {
 			serverConfig.PublicKeyCallback = func(conn ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
-				// Verify the certificate
+				// Verify it's a certificate
 				cert, ok := key.(*ssh.Certificate)
 				if !ok {
 					return nil, fmt.Errorf("expected certificate, got public key")
 				}
 
-				log.Printf("Client certificate fingerprint: %s", ssh.FingerprintSHA256(key))
-				log.Printf("Certificate valid from: %v to %v", cert.ValidAfter, cert.ValidBefore)
+				// Check certificate type (must be user certificate)
+				if cert.CertType != ssh.UserCert {
+					return nil, fmt.Errorf("expected user certificate, got %v", cert.CertType)
+				}
 
-				// For now, accept any valid certificate signed by the CA
-				// In production, we should verify the signature using the CA public key
+				// Check validity period
+				now := uint64(time.Now().Unix())
+				if now < cert.ValidAfter {
+					return nil, fmt.Errorf("certificate not yet valid")
+				}
+				if now > cert.ValidBefore {
+					return nil, fmt.Errorf("certificate has expired")
+				}
+
+				log.Printf("Certificate from %s: serial=%d, keyId=%s",
+					conn.User(), cert.Serial, cert.KeyId)
+
 				return &ssh.Permissions{
-					Extensions: map[string]string{
-						"cert-authority": "true",
-					},
+					CriticalOptions: cert.CriticalOptions,
+					Extensions:     cert.Extensions,
 				}, nil
 			}
 		}

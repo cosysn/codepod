@@ -3,16 +3,12 @@ package sandbox
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"encoding/pem"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"path"
 	"time"
-
-	"golang.org/x/crypto/ssh"
 
 	"github.com/codepod/codepod/apps/runner/pkg/docker"
 )
@@ -390,33 +386,43 @@ func parseMemory(mem string) (int64, error) {
 
 // generateAndCopySSHHostKeys generates SSH host keys and copies them to the container
 func (m *Manager) generateAndCopySSHHostKeys(ctx context.Context, containerID string) error {
-	// Generate RSA host key
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	// Create temp directory for keys
+	tmpDir, err := os.MkdirTemp("", "ssh-keys-")
 	if err != nil {
-		return fmt.Errorf("failed to generate RSA key: %w", err)
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Generate host keys using ssh-keygen
+	keygen := exec.Command("ssh-keygen", "-A", "-f", tmpDir)
+	if err := keygen.Run(); err != nil {
+		return fmt.Errorf("failed to generate host keys: %w", err)
 	}
 
-	// Convert to PEM format
-	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
-	})
-
-	// Get public key in SSH format
-	publicKey, err := ssh.NewPublicKey(&privateKey.PublicKey)
-	if err != nil {
-		return fmt.Errorf("failed to create SSH public key: %w", err)
-	}
-	publicKeySSH := ssh.MarshalAuthorizedKey(publicKey)
-
-	// Copy private key to container
-	if err := m.docker.CopyFileToContainer(ctx, containerID, "/etc/ssh/ssh_host_rsa_key", bytes.NewReader(privateKeyPEM)); err != nil {
-		return fmt.Errorf("failed to copy SSH private key: %w", err)
+	// Copy each key to container
+	keys := []string{
+		"ssh_host_rsa_key",
+		"ssh_host_ecdsa_key",
+		"ssh_host_ed25519_key",
 	}
 
-	// Copy public key to container
-	if err := m.docker.CopyFileToContainer(ctx, containerID, "/etc/ssh/ssh_host_rsa_key.pub", bytes.NewReader(publicKeySSH)); err != nil {
-		return fmt.Errorf("failed to copy SSH public key: %w", err)
+	for _, key := range keys {
+		keyPath := path.Join(tmpDir, key)
+		keyPubPath := path.Join(tmpDir, key+".pub")
+
+		// Copy private key
+		if data, err := os.ReadFile(keyPath); err == nil {
+			if err := m.docker.CopyFileToContainer(ctx, containerID, "/etc/ssh/"+key, bytes.NewReader(data)); err != nil {
+				log.Printf("Warning: failed to copy %s: %v", key, err)
+			}
+		}
+
+		// Copy public key
+		if data, err := os.ReadFile(keyPubPath); err == nil {
+			if err := m.docker.CopyFileToContainer(ctx, containerID, "/etc/ssh/"+key+".pub", bytes.NewReader(data)); err != nil {
+				log.Printf("Warning: failed to copy %s.pub: %v", key, err)
+			}
+		}
 	}
 
 	return nil

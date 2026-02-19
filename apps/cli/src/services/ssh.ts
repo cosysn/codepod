@@ -1,11 +1,15 @@
+import * as fs from 'fs';
 import { Client, ConnectConfig, ClientChannel } from 'ssh2';
 import { EventEmitter } from 'events';
+import { sshCertService } from './ssh-ca';
 
 export interface SSHConfig {
   host: string;
   port: number;
   username: string;
-  password: string;
+  password?: string;
+  privateKey?: string;
+  certificate?: string;
   readyTimeout?: number;
   timeout?: number;
 }
@@ -42,6 +46,65 @@ export class SSHService extends EventEmitter {
         reject(new Error(`SSH connection failed: ${err.message}`));
       }).connect(this.config as ConnectConfig);
     });
+  }
+
+  /**
+   * Build SSH config based on authentication method
+   */
+  static buildConfig(
+    host: string,
+    port: number,
+    username: string,
+    options: { password?: string; privateKey?: string; certificate?: string }
+  ): SSHConfig {
+    const config: SSHConfig = {
+      host,
+      port,
+      username,
+    };
+
+    if (options.certificate && options.privateKey) {
+      // Use certificate authentication
+      config.privateKey = options.privateKey;
+      config.certificate = options.certificate;
+    } else if (options.password) {
+      // Use password authentication
+      config.password = options.password;
+    }
+
+    return config;
+  }
+
+  /**
+   * Create SSH service with certificate authentication
+   */
+  static async createWithCertificate(
+    host: string,
+    port: number,
+    sandboxId: string,
+    serverUrl: string,
+    apiKey?: string
+  ): Promise<SSHService> {
+    // Check if we have existing certificate
+    if (!sshCertService.hasCertificate(sandboxId)) {
+      // Generate new key pair
+      sshCertService.generateKeyPair(sandboxId);
+      // Request certificate from server
+      await sshCertService.requestCertificate(sandboxId, serverUrl, apiKey);
+    }
+
+    const privateKeyPath = sshCertService.getPrivateKeyPath(sandboxId)!;
+    const certPath = sshCertService.getCertificatePath(sandboxId)!;
+
+    const privateKey = fs.readFileSync(privateKeyPath, 'utf-8');
+    const certificate = fs.readFileSync(certPath, 'utf-8');
+
+    const config = SSHService.buildConfig(host, port, 'root', {
+      privateKey,
+      certificate,
+    });
+
+    return new SSHService(config);
   }
 
   /**
