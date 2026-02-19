@@ -2,7 +2,7 @@
  * Core types for CodePod Server
  */
 
-export type SandboxStatus = 'pending' | 'running' | 'stopped' | 'failed' | 'deleted';
+export type SandboxStatus = 'pending' | 'running' | 'stopped' | 'failed' | 'deleted' | 'deleting';
 
 export interface AgentInfo {
   lastHeartbeat: string; // ISO timestamp

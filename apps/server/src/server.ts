@@ -244,10 +244,26 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
         return;
       }
 
-      const deleted = sandboxService.delete(id);
-      if (!deleted) {
+      // Check if sandbox exists
+      const sandbox = sandboxService.get(id);
+      if (!sandbox) {
         sendError(res, 404, 'Sandbox not found');
         return;
+      }
+
+      // If sandbox is running, create delete job for runner
+      if (sandbox.status === 'running' || sandbox.status === 'pending') {
+        createJob({
+          type: 'delete',
+          sandboxId: id,
+          image: sandbox.image,
+          token: sandbox.token || '',
+        });
+        // Update status to deleting
+        sandboxService.updateStatus(id, 'deleting');
+      } else {
+        // If not running, just delete from database
+        sandboxService.delete(id);
       }
 
       sendJson(res, 200, { success: true });

@@ -5,6 +5,8 @@ services:
     build:
       context: ../apps/server
       dockerfile: Dockerfile
+      args:
+        - NPM_REGISTRY=https://registry.npmmirror.com
     container_name: codepod-server
     ports:
       - "8080:8080"
