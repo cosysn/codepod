@@ -74,6 +74,18 @@ export class APIClient {
   }
 
   /**
+   * Make custom API request
+   */
+  async request(path: string, method: string = 'GET', data?: any): Promise<any> {
+    const response = await this.client.request({
+      url: path,
+      method,
+      data,
+    });
+    return response.data;
+  }
+
+  /**
    * Handle API error
    */
   static handleError(error: unknown): APIError {

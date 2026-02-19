@@ -486,6 +486,28 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       return;
     }
 
+    // Cleanup endpoint: remove stuck sandboxes
+    if (path === '/api/v1/cleanup' && method === 'POST') {
+      const sandboxes = store.listSandboxes();
+      const now = new Date();
+      let cleaned = 0;
+
+      for (const sb of sandboxes) {
+        // Clean stuck deleting sandboxes
+        if (sb.status === 'deleting') {
+          const createdAt = new Date(sb.createdAt);
+          const diffMinutes = (now.getTime() - createdAt.getTime()) / 60000;
+          if (diffMinutes > 1) {
+            store.deleteSandbox(sb.id);
+            cleaned++;
+          }
+        }
+      }
+
+      sendJson(res, 200, { success: true, cleaned });
+      return;
+    }
+
     // 404 for unknown routes
     sendError(res, 404, 'Not found');
   } catch (error) {
@@ -502,19 +524,31 @@ export function createServer(): { server: ReturnType<typeof httpCreateServer>; s
   function startCleanupTask(): void {
     setInterval(() => {
       const sandboxes = store.listSandboxes();
-      const runningSandboxes = sandboxes.filter(s => s.status === 'running');
+      const now = new Date();
 
+      // Check running sandboxes for stale heartbeat
+      const runningSandboxes = sandboxes.filter(s => s.status === 'running');
       for (const sb of runningSandboxes) {
-        // If last heartbeat is older than 2 minutes, mark as stopped
         if (sb.agentInfo?.lastHeartbeat) {
           const lastHeartbeat = new Date(sb.agentInfo.lastHeartbeat);
-          const now = new Date();
           const diffMinutes = (now.getTime() - lastHeartbeat.getTime()) / 60000;
 
           if (diffMinutes > 2) {
             console.log(`Sandbox ${sb.id} has no heartbeat for ${diffMinutes.toFixed(1)} minutes, marking as stopped`);
             store.updateSandbox(sb.id, { status: 'stopped' });
           }
+        }
+      }
+
+      // Check deleting sandboxes - if stuck for 5+ minutes, delete from database
+      const deletingSandboxes = sandboxes.filter(s => s.status === 'deleting');
+      for (const sb of deletingSandboxes) {
+        const createdAt = new Date(sb.createdAt);
+        const diffMinutes = (now.getTime() - createdAt.getTime()) / 60000;
+
+        if (diffMinutes > 5) {
+          console.log(`Sandbox ${sb.id} stuck in deleting status for ${diffMinutes.toFixed(1)} minutes, removing from database`);
+          store.deleteSandbox(sb.id);
         }
       }
     }, 60000); // Check every 60 seconds

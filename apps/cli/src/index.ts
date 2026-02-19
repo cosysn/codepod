@@ -13,6 +13,7 @@ import {
   configureCmd,
   stopSandboxCmd,
   restartSandboxCmd,
+  cleanupCmd,
 } from './commands';
 import { sshCommand } from './commands/ssh';
 
@@ -67,6 +68,11 @@ program
   .alias('config')
   .description('Configure CLI settings')
   .action(() => configureCmd());
+
+program
+  .command('cleanup')
+  .description('Clean up orphaned/stuck sandboxes')
+  .action(() => cleanupCmd());
 
 program.addCommand(sshCommand());
 

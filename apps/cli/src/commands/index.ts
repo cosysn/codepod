@@ -10,3 +10,4 @@ export { sshCommand } from './ssh';
 export { stopSandboxCmd } from './stop';
 export { restartSandboxCmd } from './restart';
 export { configureCmd } from './configure';
+export { cleanupCmd } from './cleanup';
