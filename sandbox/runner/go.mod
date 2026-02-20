@@ -1,4 +1,4 @@
-module github.com/codepod/codepod/apps/runner
+module github.com/codepod/codepod/sandbox/runner
 
 go 1.21
 
