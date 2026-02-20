@@ -1,4 +1,4 @@
-import { apiClient, APIClient } from '../api/client';
+import { APIClient, getAPIClient } from '../api/client';
 import { SSHService } from '../services/ssh';
 import { WorkspaceMeta, Sandbox, Volume } from '../types';
 import { configManager } from '../config';
@@ -16,9 +16,11 @@ export interface BuildOptions {
 export class WorkspaceManager {
   private builderImage = 'codepod/builder:latest';
   private registry: string;
+  private client: APIClient;
 
-  constructor(private client: APIClient = apiClient) {
+  constructor(client?: APIClient) {
     this.registry = configManager.getRegistry();
+    this.client = client || getAPIClient();
   }
 
   async create(options: BuildOptions): Promise<void> {
@@ -225,4 +227,12 @@ export class WorkspaceManager {
   }
 }
 
-export const workspaceManager = new WorkspaceManager();
+// Singleton instance - lazily created
+let workspaceManagerInstance: WorkspaceManager | null = null;
+
+export function getWorkspaceManager(): WorkspaceManager {
+  if (!workspaceManagerInstance) {
+    workspaceManagerInstance = new WorkspaceManager();
+  }
+  return workspaceManagerInstance;
+}

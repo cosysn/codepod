@@ -6,6 +6,7 @@ import list from './commands/list';
 import deleteCmd from './commands/delete';
 import stop from './commands/stop';
 import start from './commands/start';
+import configCmd from './commands/config';
 
 const program = new Command();
 
@@ -19,5 +20,6 @@ program.addCommand(list);
 program.addCommand(deleteCmd);
 program.addCommand(stop);
 program.addCommand(start);
+program.addCommand(configCmd);
 
 program.parse();

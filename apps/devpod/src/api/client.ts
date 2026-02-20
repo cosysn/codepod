@@ -30,42 +30,48 @@ function isWorkspaceMeta(obj: unknown): obj is WorkspaceMeta {
 }
 
 export class APIClient {
-  private client: AxiosInstance;
+  private client: AxiosInstance | null = null;
+  private baseURL: string;
 
   constructor(endpoint?: string) {
     const config = configManager.load();
-    const baseURL = endpoint || config.endpoint;
+    this.baseURL = endpoint || config.endpoint;
 
-    if (!baseURL) {
+    if (!this.baseURL) {
       throw new Error('API endpoint not configured. Run: devpod config set endpoint <url>');
     }
+  }
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json'
-    };
+  private getClient(): AxiosInstance {
+    if (!this.client) {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
 
-    // Add API key if configured
-    const apiKey = process.env.CODEPOD_API_KEY;
-    if (apiKey) {
-      headers['Authorization'] = `Bearer ${apiKey}`;
+      // Add API key if configured
+      const apiKey = process.env.CODEPOD_API_KEY;
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      }
+
+      this.client = axios.create({
+        baseURL: this.baseURL,
+        headers,
+        timeout: 30000
+      });
     }
-
-    this.client = axios.create({
-      baseURL,
-      headers,
-      timeout: 30000
-    });
+    return this.client;
   }
 
   // Sandbox operations
   async createSandbox(req: CreateSandboxRequest): Promise<Sandbox> {
-    const response = await this.client.post<Sandbox>('/api/v1/sandboxes', req);
+    const response = await this.getClient().post<Sandbox>('/api/v1/sandboxes', req);
     return response.data;
   }
 
   async getSandbox(id: string): Promise<Sandbox | null> {
     try {
-      const response = await this.client.get<Sandbox>(`/api/v1/sandboxes/${id}`);
+      const response = await this.getClient().get<Sandbox>(`/api/v1/sandboxes/${id}`);
       return response.data;
     } catch {
       return null;
@@ -73,30 +79,30 @@ export class APIClient {
   }
 
   async deleteSandbox(id: string): Promise<void> {
-    await this.client.delete(`/api/v1/sandboxes/${id}`);
+    await this.getClient().delete(`/api/v1/sandboxes/${id}`);
   }
 
   async stopSandbox(id: string): Promise<void> {
-    await this.client.post(`/api/v1/sandboxes/${id}/stop`);
+    await this.getClient().post(`/api/v1/sandboxes/${id}/stop`);
   }
 
   async startSandbox(id: string): Promise<void> {
-    await this.client.post(`/api/v1/sandboxes/${id}/start`);
+    await this.getClient().post(`/api/v1/sandboxes/${id}/start`);
   }
 
   async getToken(id: string): Promise<string> {
-    const response = await this.client.post<{ token: string }>(`/api/v1/sandboxes/${id}/token`);
+    const response = await this.getClient().post<{ token: string }>(`/api/v1/sandboxes/${id}/token`);
     return response.data.token;
   }
 
   // Volume operations
   async createVolume(req: CreateVolumeRequest): Promise<Volume> {
-    const response = await this.client.post<Volume>('/api/v1/volumes', req);
+    const response = await this.getClient().post<Volume>('/api/v1/volumes', req);
     return response.data;
   }
 
   async deleteVolume(id: string): Promise<void> {
-    await this.client.delete(`/api/v1/volumes/${id}`);
+    await this.getClient().delete(`/api/v1/volumes/${id}`);
   }
 
   // Workspace metadata
@@ -151,4 +157,12 @@ export class APIClient {
   }
 }
 
-export const apiClient = new APIClient();
+// Singleton instance - lazily created
+let apiClientInstance: APIClient | null = null;
+
+export function getAPIClient(): APIClient {
+  if (!apiClientInstance) {
+    apiClientInstance = new APIClient();
+  }
+  return apiClientInstance;
+}

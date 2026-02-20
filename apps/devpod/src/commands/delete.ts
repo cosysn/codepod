@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { workspaceManager } from '../workspace/manager';
+import { getWorkspaceManager } from '../workspace/manager';
 
 const deleteCmd = new Command('delete')
   .alias('rm')
@@ -7,7 +7,7 @@ const deleteCmd = new Command('delete')
   .argument('<name>', 'Workspace name')
   .action(async (name) => {
     try {
-      await workspaceManager.delete(name);
+      await getWorkspaceManager().delete(name);
     } catch (error) {
       console.error('Failed to delete workspace:', error);
       process.exit(1);

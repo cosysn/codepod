@@ -1,4 +1,4 @@
-import { apiClient, APIClient } from '../api/client';
+import { APIClient, getAPIClient } from '../api/client';
 import * as fs from 'fs';
 import * as childProcess from 'child_process';
 
@@ -8,7 +8,11 @@ export interface VSCodeConnectOptions {
 }
 
 export class VSCodeConnector {
-  constructor(private client: APIClient = apiClient) {}
+  private client: APIClient;
+
+  constructor(client?: APIClient) {
+    this.client = client || getAPIClient();
+  }
 
   async connect(options: VSCodeConnectOptions): Promise<void> {
     const sandbox = await this.client.getSandbox(options.sandboxId);
@@ -84,4 +88,12 @@ Host devpod-${sandbox.id}
   }
 }
 
-export const vscodeConnector = new VSCodeConnector();
+// Singleton instance - lazily created
+let vscodeConnectorInstance: VSCodeConnector | null = null;
+
+export function getVSCodeConnector(): VSCodeConnector {
+  if (!vscodeConnectorInstance) {
+    vscodeConnectorInstance = new VSCodeConnector();
+  }
+  return vscodeConnectorInstance;
+}

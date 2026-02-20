@@ -1,5 +1,5 @@
 import { Command } from 'commander';
-import { workspaceManager } from '../workspace/manager';
+import { getWorkspaceManager } from '../workspace/manager';
 
 const up = new Command('up')
   .description('Create workspace and open VS Code')
@@ -14,7 +14,7 @@ const up = new Command('up')
     const name = options.name || extractNameFromRepo(repoUrl);
 
     try {
-      await workspaceManager.create({
+      await getWorkspaceManager().create({
         repoUrl,
         name,
         builderCpu: parseInt(options.cpu),
