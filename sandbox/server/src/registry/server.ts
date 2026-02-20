@@ -32,7 +32,7 @@ app.use(express.json());
 // Mount registry routes
 app.use('/api/v1/registry/images', imagesRouter);
 app.use('/api/v1/registry/tags', tagsRouter);
-app.use('/v2', v2Router);
+app.use('/registry/v2', v2Router);
 
 // Health check
 app.get('/health', (req, res) => {
