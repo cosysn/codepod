@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  server:
+    build:
+      context: ../sandbox/server
+      dockerfile: Dockerfile
+      args:
+        - NPM_REGISTRY=https://registry.npmmirror.com
+    container_name: codepod-server
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - HOST=0.0.0.0
+    networks:
+      - codepod-network
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+
+  runner:
+    build:
+      context: ..
+      dockerfile: sandbox/runner/Dockerfile
+      args:
+        - GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
+    container_name: codepod-runner
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - CODEPOD_SERVER_URL=http://server:8080
+      - CODEPOD_DOCKER_HOST=unix:///var/run/docker.sock
+      - CODEPOD_DOCKER_NETWORK=codepod-network
+      - CODEPOD_MAX_JOBS=10
+      - CODEPOD_LOG_LEVEL=info
+      - CODEPOD_SANDBOX_IMAGE=codepod/agent:latest
+    networks:
+      - codepod-network
+    depends_on:
+      - server
+    restart: unless-stopped
+
+networks:
+  codepod-network:
+    name: codepod-network
+    driver: bridge

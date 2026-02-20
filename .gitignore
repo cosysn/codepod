@@ -1,7 +1,34 @@
-# ---> GNOMEShellExtension
-# Ignored files for GNOME extension git repository
+# Dependencies
+node_modules/
+vendor/
 
-*.zip
+# Build outputs
+dist/
+build/
+*.exe
 
-build/bin/*
-build/package/*
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# Test
+coverage/
+.nyc_output/
+
+# Misc
+*.tgz
+bin/

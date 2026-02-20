@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Get version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Agent
+        run: |
+          cd apps/agent
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o agent ./cmd
+
+      - name: Build Runner
+        run: |
+          cd apps/runner
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o runner ./cmd
+
+      - name: Build Server
+        run: |
+          cd apps/server
+          npm ci
+          npm run build
+
+      - name: Build Docker images
+        run: |
+          cd docker
+          docker-compose build --no-cache server runner
+
+      - name: Tag Docker images
+        run: |
+          docker tag docker_server:latest codepod/server:${{ steps.version.outputs.VERSION }}
+          docker tag docker_runner:latest codepod/runner:${{ steps.version.outputs.VERSION }}
+          docker tag docker_server:latest codepod/server:latest
+          docker tag docker_runner:latest codepod/runner:latest
+
+      - name: Login to Docker Hub
+        if: env.DOCKERHUB_TOKEN != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push Docker images
+        if: env.DOCKERHUB_TOKEN != ''
+        run: |
+          docker push codepod/server:${{ steps.version.outputs.VERSION }}
+          docker push codepod/runner:${{ steps.version.outputs.VERSION }}
+          docker push codepod/server:latest
+          docker push codepod/runner:latest
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Release assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            apps/agent/agent
+            apps/runner/runner
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

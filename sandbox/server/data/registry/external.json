@@ -1,0 +1,17 @@
+{
+  "registries": [
+    {
+      "id": "custom-1771590128110",
+      "name": "Test",
+      "type": "custom",
+      "endpoint": "",
+      "auth": {
+        "type": "basic",
+        "username": "user",
+        "password": "FAQVEg=="
+      },
+      "insecure": false,
+      "createdAt": "2026-02-20T12:22:08.111Z"
+    }
+  ]
+}

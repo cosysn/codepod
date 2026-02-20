@@ -1,0 +1,429 @@
+package sandbox
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"os/exec"
+	"path"
+	"time"
+
+	"github.com/codepod/codepod/sandbox/runner/pkg/docker"
+)
+
+// Manager manages sandbox containers
+type Manager struct {
+	docker docker.Client
+}
+
+// Sandbox represents a sandbox instance
+type Sandbox struct {
+	ID          string
+	Name        string
+	ContainerID string
+	Image       string
+	Status      SandboxStatus
+	Port        int  // SSH port mapped to host
+	CreatedAt   time.Time
+	StartedAt   time.Time
+	Config      *Config
+}
+
+// SandboxStatus represents sandbox state
+type SandboxStatus string
+
+const (
+	SandboxStatusPending   SandboxStatus = "pending"
+	SandboxStatusRunning   SandboxStatus = "running"
+	SandboxStatusStopped   SandboxStatus = "stopped"
+	SandboxStatusFailed    SandboxStatus = "failed"
+	SandboxStatusDeleting  SandboxStatus = "deleting"
+)
+
+// Config holds sandbox configuration
+type Config struct {
+	Image       string
+	Name        string
+	Env         []string
+	Memory      int64
+	CPU         int64
+	NetworkMode string
+	Labels      map[string]string
+}
+
+// CreateOptions holds options for creating a sandbox
+type CreateOptions struct {
+	Image          string
+	Name           string
+	Env            map[string]string
+	Memory         string
+	CPU            int
+	Timeout        time.Duration
+	NetworkMode    string  // "bridge", "host", or network name
+	AgentBinaryPath string  // Path to agent binary on host
+	AgentToken     string  // Token for agent to authenticate
+	AgentServerURL string  // Server URL for agent to connect
+}
+
+// NewManager creates a new sandbox manager
+func NewManager(dockerClient docker.Client) *Manager {
+	return &Manager{
+		docker: dockerClient,
+	}
+}
+
+// Create creates a new sandbox
+func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, error) {
+	// Pull image first (auto-pull if not exists)
+	if err := m.docker.PullImage(ctx, opts.Image, nil); err != nil {
+		return nil, fmt.Errorf("failed to pull image %s: %w", opts.Image, err)
+	}
+
+	// Build environment variables
+	env := []string{}
+	for k, v := range opts.Env {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// Parse memory
+	memory, err := parseMemory(opts.Memory)
+	if err != nil {
+		return nil, fmt.Errorf("invalid memory: %w", err)
+	}
+
+	// Determine agent binary path (use default in runner container or provided path)
+	agentBinaryPath := opts.AgentBinaryPath
+	needsAgentInjection := agentBinaryPath != ""
+
+	config := &docker.ContainerConfig{
+		Image:      opts.Image,
+		Name:       opts.Name,
+		Env:        env,
+		Labels:     map[string]string{"codepod.sandbox": opts.Name},
+		Memory:     memory,
+		CPUPeriod:  100000,
+		CPUShares:  int64(opts.CPU * 1024),
+		// Publish SSH port (22) to host
+		Ports: []docker.PortBinding{
+			{ContainerPort: 22, HostPort: 0, Protocol: "tcp"},
+		},
+	}
+	// Use provided network mode or default to bridge
+	if opts.NetworkMode == "" || opts.NetworkMode == "bridge" {
+		config.NetworkMode = "bridge"
+	} else {
+		config.NetworkMode = opts.NetworkMode
+	}
+
+	if needsAgentInjection {
+		// Add agent environment variables
+		config.Env = append(config.Env,
+			fmt.Sprintf("AGENT_TOKEN=%s", opts.AgentToken),
+			fmt.Sprintf("AGENT_SERVER_URL=%s", opts.AgentServerURL),
+		)
+
+		// Set entrypoint to run agent
+		config.Entrypoint = []string{"/tmp/agent", "start"}
+	}
+
+	// Create container
+	containerID, err := m.docker.CreateContainer(ctx, config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create container: %w", err)
+	}
+
+	// Copy agent binary to container (after creation, before start)
+	if needsAgentInjection {
+		// Read agent binary
+		binaryContent, err := os.ReadFile(agentBinaryPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read agent binary: %w", err)
+		}
+
+		// Copy binary to container
+		if err := m.docker.CopyFileToContainer(ctx, containerID, "/tmp/agent", bytes.NewReader(binaryContent)); err != nil {
+			return nil, fmt.Errorf("failed to copy agent binary to container: %w", err)
+		}
+
+		// Generate and copy SSH host keys for the agent
+		if err := m.generateAndCopySSHHostKeys(ctx, containerID); err != nil {
+			log.Printf("Warning: failed to generate SSH host keys: %v", err)
+		}
+	}
+
+	return &Sandbox{
+		ID:          containerID,
+		Name:        opts.Name,
+		ContainerID: containerID,
+		Image:       opts.Image,
+		Status:      SandboxStatusPending,
+		CreatedAt:   time.Now(),
+		Config: &Config{
+			Image:  opts.Image,
+			Name:   opts.Name,
+			Env:    env,
+			Memory: memory,
+			CPU:    int64(opts.CPU),
+		},
+	}, nil
+}
+
+// Start starts a sandbox
+func (m *Manager) Start(ctx context.Context, sb *Sandbox) error {
+	if err := m.docker.StartContainer(ctx, sb.ContainerID); err != nil {
+		return fmt.Errorf("failed to start container: %w", err)
+	}
+
+	sb.Status = SandboxStatusRunning
+	sb.StartedAt = time.Now()
+
+	// Query Docker for the actual SSH port
+	containerInfo, err := m.docker.ListContainers(ctx, false)
+	if err == nil {
+		for _, c := range containerInfo {
+			if c.ID == sb.ContainerID {
+				for _, p := range c.Ports {
+					if p.ContainerPort == 22 && p.Protocol == "tcp" {
+						sb.Port = p.HostPort
+						break
+					}
+				}
+				break
+			}
+		}
+	}
+
+	return nil
+}
+
+// Stop stops a sandbox
+func (m *Manager) Stop(ctx context.Context, sb *Sandbox) error {
+	if err := m.docker.StopContainer(ctx, sb.ContainerID, 10); err != nil {
+		return fmt.Errorf("failed to stop container: %w", err)
+	}
+
+	sb.Status = SandboxStatusStopped
+	return nil
+}
+
+// Delete deletes a sandbox
+func (m *Manager) Delete(ctx context.Context, sb *Sandbox) error {
+	sb.Status = SandboxStatusDeleting
+
+	if err := m.docker.RemoveContainer(ctx, sb.ContainerID, true); err != nil {
+		return fmt.Errorf("failed to remove container: %w", err)
+	}
+
+	sb.Status = SandboxStatusStopped
+	return nil
+}
+
+// GetStatus returns the current status of a sandbox
+func (m *Manager) GetStatus(ctx context.Context, sb *Sandbox) (SandboxStatus, error) {
+	state, err := m.docker.ContainerStatus(ctx, sb.ContainerID)
+	if err != nil {
+		return SandboxStatusFailed, err
+	}
+
+	switch docker.ContainerState(state) {
+	case docker.ContainerStateRunning:
+		return SandboxStatusRunning, nil
+	case docker.ContainerStateCreated, docker.ContainerStatePaused:
+		return SandboxStatusPending, nil
+	case docker.ContainerStateExited, docker.ContainerStateDead:
+		return SandboxStatusStopped, nil
+	default:
+		return SandboxStatusFailed, nil
+	}
+}
+
+// List lists all sandboxes
+func (m *Manager) List(ctx context.Context) ([]*Sandbox, error) {
+	containers, err := m.docker.ListContainers(ctx, true)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list containers: %w", err)
+	}
+
+	var sandboxes []*Sandbox
+	for _, c := range containers {
+		// Only include containers with our label
+		if _, ok := c.Labels["codepod.sandbox"]; ok {
+			// Extract SSH port (22) from port bindings
+			port := 0
+			for _, p := range c.Ports {
+				if p.ContainerPort == 22 && p.Protocol == "tcp" {
+					port = p.HostPort
+					break
+				}
+			}
+
+			sb := &Sandbox{
+				ID:          c.ID,
+				Name:        c.Names[0],
+				ContainerID: c.ID,
+				Image:       c.Image,
+				Status:      SandboxStatus(c.State),
+				Port:        port,
+			}
+			sandboxes = append(sandboxes, sb)
+		}
+	}
+
+	return sandboxes, nil
+}
+
+// Get gets a sandbox by ID
+func (m *Manager) Get(ctx context.Context, id string) (*Sandbox, error) {
+	containers, err := m.docker.ListContainers(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, c := range containers {
+		if c.ID == id {
+			// Extract SSH port (22) from port bindings
+			port := 0
+			for _, p := range c.Ports {
+				if p.ContainerPort == 22 && p.Protocol == "tcp" {
+					port = p.HostPort
+					break
+				}
+			}
+
+			return &Sandbox{
+				ID:          c.ID,
+				Name:        c.Names[0],
+				ContainerID: c.ID,
+				Image:       c.Image,
+				Status:      SandboxStatus(c.State),
+				Port:        port,
+			}, nil
+		}
+	}
+
+	return nil, fmt.Errorf("sandbox not found: %s", id)
+}
+
+// GetByName gets a sandbox by container name
+func (m *Manager) GetByName(ctx context.Context, name string) (*Sandbox, error) {
+	containers, err := m.docker.ListContainers(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, c := range containers {
+		for _, n := range c.Names {
+			// Remove leading slash
+			if len(n) > 0 && n[0] == '/' {
+				n = n[1:]
+			}
+			if n == name {
+				// Extract SSH port (22) from port bindings
+				port := 0
+				for _, p := range c.Ports {
+					if p.ContainerPort == 22 && p.Protocol == "tcp" {
+						port = p.HostPort
+						break
+					}
+				}
+
+				return &Sandbox{
+					ID:          c.ID,
+					Name:        n,
+					ContainerID: c.ID,
+					Image:       c.Image,
+					Status:      SandboxStatus(c.State),
+					Port:        port,
+				}, nil
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("sandbox not found: %s", name)
+}
+
+// parseMemory parses memory string to bytes
+func parseMemory(mem string) (int64, error) {
+	if mem == "" {
+		return 512 * 1024 * 1024, nil // Default 512MB
+	}
+
+	var multiplier int64 = 1
+	switch {
+	case len(mem) >= 2 && mem[len(mem)-2:] == "Mi":
+		multiplier = 1024 * 1024
+	case len(mem) >= 2 && mem[len(mem)-2:] == "Gi":
+		multiplier = 1024 * 1024 * 1024
+	case len(mem) >= 1 && mem[len(mem)-1:] == "M":
+		multiplier = 1024 * 1024
+	case len(mem) >= 1 && mem[len(mem)-1:] == "G":
+		multiplier = 1024 * 1024 * 1024
+	case len(mem) >= 2 && mem[len(mem)-2:] == "KB":
+		multiplier = 1024
+	case len(mem) >= 2 && mem[len(mem)-2:] == "GB":
+		multiplier = 1024 * 1024 * 1024
+	}
+
+	// Extract numeric part
+	numPart := mem
+	for len(numPart) > 0 {
+		c := numPart[len(numPart)-1]
+		if c < '0' || c > '9' {
+			break
+		}
+		numPart = numPart[:len(numPart)-1]
+	}
+
+	var value int64
+	if numPart != mem {
+		fmt.Sscanf(numPart, "%d", &value)
+	}
+
+	return value * multiplier, nil
+}
+
+// generateAndCopySSHHostKeys generates SSH host keys and copies them to the container
+func (m *Manager) generateAndCopySSHHostKeys(ctx context.Context, containerID string) error {
+	// Create temp directory for keys
+	tmpDir, err := os.MkdirTemp("", "ssh-keys-")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Generate host keys using ssh-keygen
+	keygen := exec.Command("ssh-keygen", "-A", "-f", tmpDir)
+	if err := keygen.Run(); err != nil {
+		return fmt.Errorf("failed to generate host keys: %w", err)
+	}
+
+	// Copy each key to container
+	keys := []string{
+		"ssh_host_rsa_key",
+		"ssh_host_ecdsa_key",
+		"ssh_host_ed25519_key",
+	}
+
+	for _, key := range keys {
+		keyPath := path.Join(tmpDir, key)
+		keyPubPath := path.Join(tmpDir, key+".pub")
+
+		// Copy private key
+		if data, err := os.ReadFile(keyPath); err == nil {
+			if err := m.docker.CopyFileToContainer(ctx, containerID, "/etc/ssh/"+key, bytes.NewReader(data)); err != nil {
+				log.Printf("Warning: failed to copy %s: %v", key, err)
+			}
+		}
+
+		// Copy public key
+		if data, err := os.ReadFile(keyPubPath); err == nil {
+			if err := m.docker.CopyFileToContainer(ctx, containerID, "/etc/ssh/"+key+".pub", bytes.NewReader(data)); err != nil {
+				log.Printf("Warning: failed to copy %s.pub: %v", key, err)
+			}
+		}
+	}
+
+	return nil
+}

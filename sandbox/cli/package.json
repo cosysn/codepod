@@ -1,0 +1,40 @@
+{
+  "name": "codepod-cli",
+  "version": "0.1.0",
+  "description": "CodePod CLI - Command line interface for sandbox management",
+  "main": "dist/index.js",
+  "bin": {
+    "codepod": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc && cp package.json dist/",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "jest"
+  },
+  "keywords": [
+    "codepod",
+    "cli",
+    "sandbox"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.0.0",
+    "commander": "^11.0.0",
+    "inquirer": "^9.0.0",
+    "node-pty": "^1.0.0",
+    "ssh2": "^1.15.0",
+    "sshpk": "^1.18.0"
+  },
+  "devDependencies": {
+    "@types/inquirer": "^9.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.0.0",
+    "@types/ssh2": "^1.15.0",
+    "@types/sshpk": "^1.17.4",
+    "jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "ts-node": "^10.0.0",
+    "typescript": "^5.0.0"
+  }
+}

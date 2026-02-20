@@ -1,90 +1,244 @@
-# Makefile for LazyDev project
-VERSION := 1.0.0
-BUILD_TIME := $(shell date +%Y%m%d%H%M%S)
-DIST_DIR := build
-BIN_DIR := $(DIST_DIR)/bin
-PKG_DIR := $(DIST_DIR)/pkg
-INSTALLER_DIR := installer
+# CodePod Build System
+# All build outputs go to build/ directory
 
-.PHONY: all clean build-binaries
+.PHONY: all clean build build-sdk build-agent build-agent-amd64 build-agent-arm64 build-runner build-server build-cli test help docker-up docker-down docker-logs docker-status build-devpod devpod-publish-builder clean-devpod
 
-all: clean build-binaries
+# Directory structure
+BUILD_DIR := build
+SDK_DIR := libs/sdk-go
+RUNNER_DIR := sandbox/runner
+AGENT_DIR := sandbox/agent
+SERVER_DIR := sandbox/server
+CLI_DIR := sandbox/cli
+DOCKER_DIR := docker
 
-# 清理构建产物
+# Default target
+all: help
+	@echo "Use 'make help' to see available targets"
+
+help:
+	@echo "CodePod Build System"
+	@echo ""
+	@echo "Build Targets:"
+	@echo "  build          - Build all components"
+	@echo "  build-sdk      - Build SDK (Go)"
+	@echo "  build-runner   - Build Runner (Go)"
+	@echo "  build-agent    - Build Agent (Go)"
+	@echo "  build-server   - Build Server (TypeScript)"
+	@echo "  build-cli      - Build CLI (TypeScript)"
+	@echo ""
+	@echo "Test Targets:"
+	@echo "  test           - Run all tests"
+	@echo "  test-sdk       - Run SDK tests"
+	@echo "  test-runner    - Run Runner tests"
+	@echo "  test-agent     - Run Agent tests"
+	@echo "  test-server    - Run Server tests"
+	@echo "  test-cli       - Run CLI tests"
+	@echo ""
+	@echo "Utility Targets:"
+	@echo "  clean          - Remove build artifacts"
+	@echo "  help           - Show this help message"
+
+# Create build directory (phony target)
+ensure-build-dir:
+	mkdir -p $(BUILD_DIR)
+
+# Build SDK (Go)
+build-sdk: ensure-build-dir
+	@echo "Building SDK..."
+	cd $(SDK_DIR) && go build -o ../$(BUILD_DIR)/sdk-go.a
+	@echo "SDK built: $(BUILD_DIR)/sdk-go.a"
+
+# Build Runner (Go) - requires cmd/main.go
+build-runner:
+	@echo "Building Runner..."
+	@if [ -f $(RUNNER_DIR)/cmd/main.go ]; then \
+		mkdir -p $(BUILD_DIR); \
+		go build -o $(BUILD_DIR)/runner $(RUNNER_DIR)/cmd; \
+		echo "Runner built: $(BUILD_DIR)/runner"; \
+	else \
+		echo "Runner entry point not found: $(RUNNER_DIR)/cmd/main.go"; \
+		echo "Skipping Runner build."; \
+	fi
+
+# Build Agent (Go) - requires cmd/main.go
+# Supports multiple architectures: amd64 (x86_64), arm64
+build-agent: build-agent-amd64 build-agent-arm64
+	@echo ""
+	@echo "Agent binaries built:"
+	@ls -la $(CURDIR)/$(BUILD_DIR)/agent* 2>/dev/null || echo "No agent binaries found"
+
+build-agent-amd64:
+	@echo "Building agent for linux/amd64..."
+	@if [ -f $(AGENT_DIR)/cmd/main.go ]; then \
+		mkdir -p $(BUILD_DIR); \
+		cd $(AGENT_DIR) && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../../$(BUILD_DIR)/agent ./cmd && echo "Agent built: $(CURDIR)/$(BUILD_DIR)/agent" || echo "Agent build failed"; \
+	else \
+		echo "Agent entry point not found: $(AGENT_DIR)/cmd/main.go"; \
+		echo "Skipping Agent build."; \
+	fi
+
+build-agent-arm64:
+	@echo "Building agent for linux/arm64..."
+	@if [ -f $(AGENT_DIR)/cmd/main.go ]; then \
+		mkdir -p $(BUILD_DIR); \
+		cd $(AGENT_DIR) && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o ../../$(BUILD_DIR)/agent-arm64 ./cmd && echo "Agent built: $(CURDIR)/$(BUILD_DIR)/agent-arm64" || echo "Agent build failed"; \
+	else \
+		echo "Agent entry point not found: $(AGENT_DIR)/cmd/main.go"; \
+		echo "Skipping Agent build."; \
+	fi
+
+# Build Server (TypeScript)
+build-server:
+	@echo "Building Server..."
+	cd $(SERVER_DIR) && npm run build && cp package.json dist/
+	mkdir -p $(BUILD_DIR)/server
+	cp -r $(SERVER_DIR)/dist/* $(BUILD_DIR)/server/
+	cp -r $(SERVER_DIR)/node_modules $(BUILD_DIR)/server/
+	@echo "Server built: $(BUILD_DIR)/server"
+
+# Build CLI (TypeScript)
+build-cli:
+	@echo "Building CLI..."
+	cd $(CLI_DIR) && npm run build
+	mkdir -p $(BUILD_DIR)/cli
+	cp -r $(CLI_DIR)/dist/* $(BUILD_DIR)/cli/
+	cp -r $(CLI_DIR)/node_modules $(BUILD_DIR)/cli/
+	cp $(CLI_DIR)/package.json $(BUILD_DIR)/cli/
+	@echo "CLI built: $(BUILD_DIR)/cli"
+
+# Build all available components
+build:
+	@echo "Building all components..."
+	@$(MAKE) ensure-build-dir
+	@$(MAKE) build-sdk 2>/dev/null || true
+	@$(MAKE) build-server 2>/dev/null || true
+	@$(MAKE) build-cli 2>/dev/null || true
+	@$(MAKE) build-runner 2>/dev/null || true
+	@$(MAKE) build-agent 2>/dev/null || true
+	@echo ""
+	@echo "Build complete!"
+	@ls -la $(BUILD_DIR)/ 2>/dev/null || echo "No build artifacts"
+
+# Run all tests
+test:
+	@echo "Running all tests..."
+	cd $(SDK_DIR) && go test ./...
+	cd $(RUNNER_DIR) && go test ./...
+	cd $(AGENT_DIR) && go test ./...
+	cd $(SERVER_DIR) && npm test
+	cd $(CLI_DIR) && npm test
+	@echo ""
+	@echo "All tests passed!"
+
+# Test individual components
+test-sdk:
+	@echo "Running SDK tests..."
+	cd $(SDK_DIR) && go test ./...
+
+test-runner:
+	@echo "Running Runner tests..."
+	cd $(RUNNER_DIR) && go test ./...
+
+test-agent:
+	@echo "Running Agent tests..."
+	cd $(AGENT_DIR) && go test ./...
+
+test-server:
+	@echo "Running Server tests..."
+	cd $(SERVER_DIR) && npm test
+
+test-cli:
+	@echo "Running CLI tests..."
+	cd $(CLI_DIR) && npm test
+
+# Clean build artifacts
 clean:
 	@echo "Cleaning build artifacts..."
-	rm -rf $(DIST_DIR)/bin/codepod
-# 	rm -rf $(INSTALLER_DIR)
-# 	docker rm -f temp-build || true
-# 	docker rm -f temp-data-build || true
+	rm -rf $(BUILD_DIR)
+	cd $(SDK_DIR) && rm -f ../$(BUILD_DIR)/sdk-go.a 2>/dev/null || true
+	cd $(SERVER_DIR) && rm -rf dist
+	cd $(CLI_DIR) && rm -rf dist
+	@echo "Cleaned!"
 
-# 编译二进制文件
-build-binaries:
-	@echo "Building binaries..."
+# Show build status
+status:
+	@echo "Component Build Status:"
+	@echo ""
+	@echo "SDK:"
+	@[ -f $(SDK_DIR)/go.mod ] && echo "  ✓ Go module exists" || echo "  ✗ Missing"
+	@echo ""
+	@echo "Runner:"
+	@[ -f $(RUNNER_DIR)/cmd/main.go ] && echo "  ✓ Entry point exists" || echo "  ✗ Missing (cmd/main.go)"
+	@echo ""
+	@echo "Agent:"
+	@[ -f $(AGENT_DIR)/cmd/main.go ] && echo "  ✓ Entry point exists" || echo "  ✗ Missing (cmd/main.go)"
+	@echo ""
+	@echo "Server:"
+	@[ -f $(SERVER_DIR)/package.json ] && echo "  ✓ Package.json exists" || echo "  ✗ Missing"
+	@[ -d $(SERVER_DIR)/src ] && echo "  ✓ Source directory exists" || echo "  ✗ Missing"
+	@echo ""
+	@echo "CLI:"
+	@[ -f $(CLI_DIR)/package.json ] && echo "  ✓ Package.json exists" || echo "  ✗ Missing"
+	@[ -d $(CLI_DIR)/src ] && echo "  ✓ Source directory exists" || echo "  ✗ Missing"
 
-# 	go mod tidy
+# Development targets
+dev-sdk:
+	@echo "SDK development mode - use go run in libs/sdk-go"
 
-# 编译 Windows 客户端
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
-		go build -ldflags="-s -w" -o $(BIN_DIR)/codepod ./cmd/cli
-	
-# 编译 Linux 守护进程
-	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
-		go build -ldflags="-s -w" -o $(BIN_DIR)/coderd ./cmd/coderd
+dev-runner:
+	@echo "Runner development mode - use go run in sandbox/runner/cmd/runner"
 
+dev-agent:
+	@echo "Agent development mode - use go run in sandbox/agent/cmd/agent"
 
-# 构建 Docker 镜像
-build-images:
-	@echo "Building Docker images..."
+dev-server:
+	@echo "Server development mode - use npm run dev in sandbox/server"
 
-	echo "Version: $(VERSION)" > $(DIST_DIR)/VERSION
-	echo "BuildTime: $(BUILD_TIME)" >> $(DIST_DIR)/VERSION
-	
-	# 构建 lazydev-desktop
-	mkdir -p $(DIST_DIR)/lazydev-desktop/
-	cp -rf docker/lazydev-desktop/debain/* $(DIST_DIR)/lazydev-desktop/
-	chmod a+r $(DIST_DIR)/lazydev-desktop/root-fs/etc/apt/keyrings/docker.asc
-	cp $(BIN_DIR)/lazyd $(DIST_DIR)/lazydev-desktop/root-fs/opt/lazydev/bin/
-	cp $(DIST_DIR)/VERSION $(DIST_DIR)/lazydev-desktop/root-fs/opt/lazydev/
-	docker build -t lazydev-desktop:$(VERSION) -f $(DIST_DIR)/lazydev-desktop/Dockerfile $(DIST_DIR)/lazydev-desktop/
-	docker create --name temp-build lazydev-desktop:$(VERSION)
-	docker export temp-build -o $(DIST_DIR)/lazydev-desktop.tar
-	docker rm -f temp-build
-	
-	# 构建 lazydev-desktop-data
-	mkdir -p $(DIST_DIR)/lazydev-desktop-data/
-	cp -rf docker/lazydev-desktop-data/* $(DIST_DIR)/lazydev-desktop-data/
-	docker build -t lazydev-desktop-data:$(VERSION) -f $(DIST_DIR)/lazydev-desktop-data/Dockerfile $(DIST_DIR)/lazydev-desktop-data/
-	docker create --name temp-data-build lazydev-desktop-data:$(VERSION)
-	docker export temp-data-build -o $(DIST_DIR)/lazydev-desktop-data.tar
-	docker rm -f temp-data-build
+dev-cli:
+	@echo "CLI development mode - use npm run dev in sandbox/cli"
 
-# 制作安装包
-package:
-	@echo "Packaging release..."
-	mkdir -p $(PKG_DIR)
-	
-	# 复制必要文件
-	cp -r $(BIN_DIR)/lazydev.exe $(PKG_DIR)
-	cp $(DIST_DIR)/*.tar $(PKG_DIR)
-	
-	# 创建版本文件
-	echo "Version: $(VERSION)" > $(PKG_DIR)/VERSION
-	echo "BuildTime: $(BUILD_TIME)" >> $(PKG_DIR)/VERSION
+# Docker Targets
+docker-up:
+	@echo "Starting CodePod services with Docker..."
+	cd $(DOCKER_DIR) && docker-compose up -d --build
+	@echo ""
+	@echo "Services started! Check logs with: make docker-logs"
+	@echo "Server: http://localhost:8080"
 
-# Windows 安装包 (需要预先安装 Inno Setup)
-installer:
-	@echo "Building Windows installer..."
-	mkdir -p $(INSTALLER_DIR)
+docker-down:
+	@echo "Stopping CodePod services..."
+	cd $(DOCKER_DIR) && docker-compose down
+	@echo "Services stopped!"
 
-	# 生成安装脚本
-	sed 's/{{VERSION}}/$(VERSION)/g' installer.template.iss > $(INSTALLER_DIR)/installer.iss
-	
-	# 检查 Inno Setup 是否安装
-	@if ! command -v iscc >/dev/null; then \
-		echo "Error: Inno Setup Compiler (iscc) not found"; \
-		exit 1; \
-	fi
-	
-	iscc $(INSTALLER_DIR)/installer.iss
-	mv $(INSTALLER_DIR)/Output/setup.exe $(DIST_DIR)/lazydev-$(VERSION)-setup.exe
+docker-logs:
+	@echo "Showing Docker logs (Ctrl+C to exit)..."
+	cd $(DOCKER_DIR) && docker-compose logs -f
+
+docker-status:
+	@echo "Checking service status..."
+	cd $(DOCKER_DIR) && docker-compose ps
+	@echo ""
+	@echo "Health check:"
+	@curl -s http://localhost:8080/health || echo "Server not responding"
+
+docker-restart:
+	@echo "Restarting CodePod services..."
+	cd $(DOCKER_DIR) && docker-compose down && docker-compose up -d
+	@echo "Services restarted!"
+
+# DevPod targets
+build-devpod:
+	@echo "Building DevPod..."
+	cd apps/devpod && npm install && npm run build
+
+devpod-publish-builder:
+	@echo "Building and publishing builder image..."
+	docker build -t codepod/builder:latest ./apps/devpod/builder
+	docker tag codepod/builder:latest localhost:5000/codepod/builder:latest
+	docker push localhost:5000/codepod/builder:latest
+
+clean-devpod:
+	@echo "Cleaning DevPod..."
+	rm -rf apps/devpod/dist
+	rm -rf apps/devpod/node_modules
