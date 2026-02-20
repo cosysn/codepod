@@ -53,14 +53,18 @@ export class ImageResolver {
       };
     }
 
-    // Docker Hub official images
+    // Docker Hub official images - use preferCache setting
     if (!parsed.registry || parsed.registry === 'docker.io') {
       const fullImage = this.parser.parse(`docker.io/${parsed.repository}:${parsed.tag}`);
+      // When preferCache is true, try to use internal registry cache first
+      // Map to internal registry path for caching
+      const cacheRepo = `${this.config.cacheRegistry}/${parsed.repository}`;
+      const cachedImage = this.parser.parse(`${cacheRepo}:${parsed.tag}`);
       return {
-        ...fullImage,
+        ...cachedImage,
         originalName: imageName,
-        registry: 'docker.io',
-        useCache: false,
+        registry: this.config.preferCache ? this.config.cacheRegistry : 'docker.io',
+        useCache: this.config.preferCache,
       };
     }
 
@@ -78,23 +82,52 @@ export class ImageResolver {
     if (image.useCache) {
       const exists = await this.cache.exists(image);
       if (exists) {
+        // Image found in cache - use internal registry
         return image;
       }
 
-      // Try to pull from external to cache
-      if (image.registry !== this.config.cacheRegistry) {
-        await this.pullToCache(image);
-      }
+      // Not in cache - need to pull from external registry
+      // Create source image reference for pulling
+      const sourceImage: ResolvedImage = {
+        ...image,
+        registry: this.getExternalRegistry(image.originalName),
+      };
+
+      // Pull from external to cache
+      await this.pullToCache(sourceImage, image);
+
+      // Return the cached image path
+      return image;
     }
 
     return image;
   }
 
-  async pullToCache(image: ResolvedImage): Promise<void> {
-    // Implementation for pulling to cache
-    const manifest = await this.client.fetchManifest(image);
-    // Store manifest and blobs to cache
-    await this.cache.storeManifest(image, manifest);
+  /**
+   * Get the external registry URL for an image
+   */
+  private getExternalRegistry(imageName: string): string {
+    const parsed = this.parser.parse(imageName);
+    if (parsed.registry && parsed.registry !== 'docker.io' && parsed.registry !== this.config.cacheRegistry) {
+      return parsed.registry;
+    }
+    return 'docker.io';
+  }
+
+  async pullToCache(sourceImage: ResolvedImage, cachedImage: ResolvedImage): Promise<void> {
+    try {
+      // Fetch manifest from external registry
+      const manifest = await this.client.fetchManifest(sourceImage);
+
+      // Store manifest in cache
+      await this.cache.storeManifest(cachedImage, manifest);
+
+      // TODO: Pull and store all blobs to fully cache the image
+      // For now, we store the manifest which marks the image as cached
+    } catch (error) {
+      console.error(`Failed to pull image to cache: ${error}`);
+      throw error;
+    }
   }
 
   async listCachedImages(): Promise<string[]> {

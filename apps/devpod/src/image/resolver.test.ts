@@ -13,10 +13,23 @@ describe('ImageResolver', () => {
     });
   });
 
-  test('should resolve simple image', () => {
+  test('should resolve simple image with preferCache enabled', () => {
     const result = resolver.resolve('python:3.11');
     expect(result.repository).toBe('python');
     expect(result.tag).toBe('3.11');
+    // When preferCache is true, use internal registry
+    expect(result.registry).toBe('localhost:5000');
+    expect(result.useCache).toBe(true);
+  });
+
+  test('should resolve simple image without cache when preferCache is false', () => {
+    const resolverNoCache = new ImageResolver({
+      preferCache: false,
+      cacheRegistry: 'localhost:5000',
+      fallbackRegistries: ['docker.io'],
+      prefixMappings: {},
+    });
+    const result = resolverNoCache.resolve('python:3.11');
     expect(result.registry).toBe('docker.io');
     expect(result.useCache).toBe(false);
   });
