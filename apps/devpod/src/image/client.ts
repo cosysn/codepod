@@ -3,7 +3,6 @@
 import { ResolvedImage } from './types';
 
 export class RegistryClient {
-  private tokenCache: Map<string, string> = new Map();
 
   /**
    * Check if image exists in registry
@@ -65,16 +64,8 @@ export class RegistryClient {
   }
 
   private getAuthHeaders(image: ResolvedImage): Record<string, string> {
-    const headers: Record<string, string> = {
+    return {
       'Accept': 'application/vnd.oci.image.manifest.v1+json',
     };
-
-    // For docker.io, try to get token
-    if (image.registry === 'docker.io') {
-      // Basic auth for docker hub
-      // In production, use proper token handling
-    }
-
-    return headers;
   }
 }
