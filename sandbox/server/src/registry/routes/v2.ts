@@ -77,6 +77,40 @@ router.get('/:name/manifests/:ref', async (req: Request, res: Response) => {
   }
 });
 
+// PUT /v2/<name>/manifests/<ref> - Push manifest
+router.put('/:name/manifests/:ref', async (req: Request, res: Response) => {
+  try {
+    const { name, ref } = req.params;
+    const r = getRegistry();
+
+    // Parse manifest from body
+    let manifest: any;
+    if (Buffer.isBuffer(req.body)) {
+      manifest = JSON.parse(req.body.toString());
+    } else if (typeof req.body === 'string') {
+      manifest = JSON.parse(req.body);
+    } else {
+      manifest = req.body;
+    }
+
+    // Validate manifest
+    if (!manifest.schemaVersion || !manifest.config || !manifest.layers) {
+      return res.status(400).json({ errors: [{ code: 'MANIFEST_INVALID', message: 'Invalid manifest format' }] });
+    }
+
+    await r.pushManifest(name, ref, manifest as any);
+
+    // Calculate digest for response
+    const digest = `sha256:${crypto.createHash('sha256').update(JSON.stringify(manifest)).digest('hex')}`;
+    res.set('Docker-Content-Digest', digest);
+    res.status(201);
+    res.json({ digest });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    res.status(500).json({ errors: [{ code: 'INTERNAL_ERROR', message }] });
+  }
+});
+
 // HEAD /v2/<name>/blobs/<digest> - Check blob exists
 router.head('/:name/blobs/:digest', async (req: Request, res: Response) => {
   try {
