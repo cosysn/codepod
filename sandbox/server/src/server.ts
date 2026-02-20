@@ -4,6 +4,7 @@
 
 import { IncomingMessage, ServerResponse, createServer as httpCreateServer } from 'http';
 import { sandboxService } from './services/sandbox';
+import { volumeService } from './services/volume';
 import { createJob, getPendingJobs, assignJob, completeJob, getAllJobs } from './services/job';
 import { store } from './db/store';
 import { Sandbox, CreateSandboxRequest, ErrorResponse, SandboxStatus } from './types';
@@ -424,6 +425,72 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (path === '/api/v1/all-jobs' && method === 'GET') {
       const allJobs = getAllJobs();
       sendJson(res, 200, { jobs: allJobs });
+      return;
+    }
+
+    // Volume routes
+    if (path === '/api/v1/volumes' && method === 'POST') {
+      const body = await parseBody(req);
+      if (!body || typeof body !== 'object') {
+        sendError(res, 400, 'Missing request body');
+        return;
+      }
+
+      const data = body as Record<string, unknown>;
+      const reqData = {
+        name: data.name as string,
+        size: data.size as string,
+      };
+
+      try {
+        const result = volumeService.create(reqData);
+        store.log('CREATE', 'volume', result.volumeId, undefined, { name: reqData.name, size: reqData.size });
+        sendJson(res, 201, result);
+        return;
+      } catch (e) {
+        sendError(res, 400, (e as Error).message);
+        return;
+      }
+    }
+
+    if (path === '/api/v1/volumes' && method === 'GET') {
+      const result = volumeService.list();
+      sendJson(res, 200, result);
+      return;
+    }
+
+    if (path.startsWith('/api/v1/volumes/') && method === 'GET') {
+      const id = path.split('/').pop();
+      if (!id) {
+        sendError(res, 400, 'Missing volume ID');
+        return;
+      }
+
+      const volume = volumeService.get(id);
+      if (!volume) {
+        sendError(res, 404, 'Volume not found');
+        return;
+      }
+
+      sendJson(res, 200, { volume });
+      return;
+    }
+
+    if (path.startsWith('/api/v1/volumes/') && method === 'DELETE') {
+      const id = path.split('/').pop();
+      if (!id) {
+        sendError(res, 400, 'Missing volume ID');
+        return;
+      }
+
+      const deleted = volumeService.delete(id);
+      if (!deleted) {
+        sendError(res, 404, 'Volume not found');
+        return;
+      }
+
+      store.log('DELETE', 'volume', id);
+      sendJson(res, 200, { success: true });
       return;
     }
 

@@ -5,6 +5,7 @@
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import {
   Sandbox,
+  Sandbox as SandboxType,
   CreateSandboxRequest,
   CreateSandboxResponse,
   SandboxListResponse,
@@ -23,6 +24,9 @@ import {
 } from '../types';
 
 export { ErrorResponse } from '../types';
+
+// Import Sandbox class
+import { Sandbox as SandboxClass } from '../sandbox';
 
 /**
  * CodePod API Client
@@ -69,6 +73,27 @@ export class CodePodClient {
   async createSandbox(request: CreateSandboxRequest): Promise<CreateSandboxResponse> {
     const response = await this.client.post<CreateSandboxResponse>('/api/v1/sandboxes', request);
     return response.data;
+  }
+
+  /**
+   * Create a new sandbox and wait for it to be running
+   * Similar to E2B's Sandbox.create() behavior
+   * @param request Sandbox creation request
+   * @param timeout Maximum time to wait in seconds (default: 120)
+   * @returns Sandbox instance ready to use
+   */
+  async createSandboxAndWait(
+    request: CreateSandboxRequest,
+    timeout: number = 120
+  ): Promise<SandboxClass> {
+    // Create the sandbox
+    const response = await this.createSandbox(request);
+    const sandbox = new SandboxClass(this, response.sandbox);
+
+    // Wait for it to be running
+    await sandbox.waitForRunning(timeout);
+
+    return sandbox;
   }
 
   /**

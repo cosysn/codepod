@@ -91,3 +91,25 @@ export interface AuditLog {
   details?: Record<string, unknown>;
   timestamp: Date;
 }
+
+// Volume types
+export type VolumeStatus = 'available' | 'in-use' | 'deleting';
+
+export interface Volume {
+  id: string;
+  name: string;
+  status: VolumeStatus;
+  size: string;
+  hostPath?: string;
+  createdAt: Date;
+}
+
+export interface CreateVolumeRequest {
+  name: string;
+  size?: string; // e.g., "10Gi", defaults to "10Gi"
+}
+
+export interface CreateVolumeResponse {
+  volumeId: string;
+  hostPath: string;
+}

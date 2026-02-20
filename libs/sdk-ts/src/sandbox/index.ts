@@ -96,6 +96,49 @@ export class Sandbox {
   }
 
   /**
+   * Check if sandbox is running
+   */
+  get isRunning(): boolean {
+    return this.sandbox.status === 'running';
+  }
+
+  /**
+   * Wait for sandbox to be running
+   * @param timeout Maximum time to wait in seconds (default: 120)
+   * @param interval Polling interval in milliseconds (default: 2000)
+   * @throws Error if sandbox fails to start or timeout
+   */
+  async waitForRunning(timeout: number = 120, interval: number = 2000): Promise<void> {
+    const startTime = Date.now();
+    const maxTime = timeout * 1000;
+
+    while (Date.now() - startTime < maxTime) {
+      // Refresh sandbox status
+      const updated = await this.client.getSandbox(this.sandbox.id);
+      if (updated) {
+        this.sandbox = updated;
+
+        if (this.sandbox.status === 'running') {
+          return; // Success!
+        }
+
+        if (this.sandbox.status === 'failed') {
+          throw new Error(`Sandbox failed to start: ${this.sandbox.status}`);
+        }
+
+        if (this.sandbox.status === 'deleted') {
+          throw new Error('Sandbox was deleted during creation');
+        }
+      }
+
+      // Wait before next poll
+      await new Promise(resolve => setTimeout(resolve, interval));
+    }
+
+    throw new Error(`Timeout waiting for sandbox to start (${timeout}s)`);
+  }
+
+  /**
    * Execute a command and wait for result
    */
   async runCommand(
@@ -108,7 +151,7 @@ export class Sandbox {
   ): Promise<CommandResult> {
     // This would connect via SSH and execute
     // For now, return a placeholder
-    throw new Error('runCommand requires SSH connection. Use SandboxHandle for full implementation.');
+    throw new Error('runCommand requires SSH connection. Use SSHService for full implementation.');
   }
 
   /**
@@ -116,7 +159,7 @@ export class Sandbox {
    */
   async uploadFile(path: string, content: Buffer | string): Promise<void> {
     // Placeholder for file upload
-    throw new Error('uploadFile requires SSH connection. Use SandboxHandle for full implementation.');
+    throw new Error('uploadFile requires SSH connection. Use SSHService for full implementation.');
   }
 
   /**
@@ -124,7 +167,7 @@ export class Sandbox {
    */
   async downloadFile(path: string): Promise<Buffer> {
     // Placeholder for file download
-    throw new Error('downloadFile requires SSH connection. Use SandboxHandle for full implementation.');
+    throw new Error('downloadFile requires SSH connection. Use SSHService for full implementation.');
   }
 
   /**
@@ -147,6 +190,7 @@ export class Sandbox {
    */
   async start(): Promise<void> {
     await this.client.restartSandbox(this.sandbox.id);
+    await this.waitForRunning();
   }
 
   /**

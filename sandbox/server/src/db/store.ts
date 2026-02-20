@@ -9,6 +9,9 @@ import {
   AuditLog,
   CreateSandboxRequest,
   AgentInfo,
+  Volume,
+  VolumeStatus,
+  CreateVolumeRequest,
 } from '../types';
 
 // Simple UUID generator (browser/node compatible)
@@ -24,7 +27,9 @@ export class Store {
   private sandboxes: Map<string, Sandbox> = new Map();
   private apiKeys: Map<string, APIKey> = new Map();
   private auditLogs: AuditLog[] = [];
-  private sandboxCounter: number = 0;
+  private sandboxesCounter: number = 0;
+  private volumes: Map<string, Volume> = new Map();
+  private volumesCounter: number = 0;
 
   constructor() {
     // Initialize with a default API key for testing
@@ -36,7 +41,7 @@ export class Store {
 
   // Sandbox operations
   createSandbox(req: CreateSandboxRequest, metadata?: Record<string, unknown>): Sandbox {
-    const id = `sbox-${++this.sandboxCounter}-${generateId().slice(0, 8)}`;
+    const id = `sbox-${++this.sandboxesCounter}-${generateId().slice(0, 8)}`;
     const now = new Date();
 
     const sandbox: Sandbox = {
@@ -251,7 +256,64 @@ export class Store {
     this.sandboxes.clear();
     this.apiKeys.clear();
     this.auditLogs = [];
-    this.sandboxCounter = 0;
+    this.sandboxesCounter = 0;
+    this.volumes.clear();
+    this.volumesCounter = 0;
+  }
+
+  // Volume operations
+  createVolume(req: CreateVolumeRequest): Volume {
+    const id = `vol-${++this.volumesCounter}-${generateId().slice(0, 8)}`;
+    const now = new Date();
+
+    const volume: Volume = {
+      id,
+      name: req.name || `volume-${id.slice(0, 8)}`,
+      status: 'available',
+      size: req.size || '10Gi',
+      createdAt: now,
+    };
+
+    this.volumes.set(id, volume);
+    this.log('CREATE', 'volume', id, undefined, { name: volume.name, size: volume.size });
+
+    return volume;
+  }
+
+  getVolume(id: string): Volume | undefined {
+    return this.volumes.get(id);
+  }
+
+  listVolumes(): Volume[] {
+    return Array.from(this.volumes.values());
+  }
+
+  deleteVolume(id: string): boolean {
+    const volume = this.volumes.get(id);
+    if (!volume) return false;
+
+    if (volume.status === 'in-use') {
+      // Mark as deleting instead of immediately deleting
+      volume.status = 'deleting';
+      this.volumes.set(id, volume);
+      this.log('UPDATE', 'volume', id, undefined, { status: 'deleting' });
+      return true;
+    }
+
+    const deleted = this.volumes.delete(id);
+    if (deleted) {
+      this.log('DELETE', 'volume', id);
+    }
+    return deleted;
+  }
+
+  updateVolumeHostPath(id: string, hostPath: string): Volume | undefined {
+    const volume = this.volumes.get(id);
+    if (!volume) return undefined;
+
+    volume.hostPath = hostPath;
+    this.volumes.set(id, volume);
+    return volume;
   }
 }
 
