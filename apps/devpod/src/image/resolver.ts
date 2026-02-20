@@ -23,10 +23,17 @@ export class ImageResolver {
   }
 
   resolve(imageName: string): ResolvedImage {
+    // Input validation
+    if (!imageName || typeof imageName !== 'string' || imageName.trim() === '') {
+      throw new Error('Image name cannot be empty');
+    }
+
     const parsed = this.parser.parse(imageName);
 
-    // Check prefix mappings
-    if (this.config.prefixMappings[parsed.repository]) {
+    // Check prefix mappings - only apply if no explicit registry was specified
+    // (i.e., using default Docker Hub)
+    const hasExplicitRegistry = parsed.registry && parsed.registry !== 'docker.io';
+    if (!hasExplicitRegistry && this.config.prefixMappings[parsed.repository]) {
       const mapped = this.parser.parse(
         `${this.config.prefixMappings[parsed.repository]}:${parsed.tag}`
       );

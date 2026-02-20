@@ -4,9 +4,9 @@ describe('Image Types', () => {
   test('ResolvedImage should have required fields', () => {
     const image: ResolvedImage = {
       originalName: 'python:3.11',
-      fullName: 'docker.io/library/python:3.11',
+      fullName: 'python:3.11', // Parser omits docker.io prefix for fullName
       registry: 'docker.io',
-      repository: 'library/python',
+      repository: 'python',
       tag: '3.11',
       useCache: false,
     };
