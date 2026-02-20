@@ -9,6 +9,19 @@ export interface DevPodConfig {
   registry: string;
 }
 
+const defaultConfig: DevPodConfig = {
+  endpoint: '',
+  registry: 'localhost:5000',
+};
+
+function isDevPodConfig(obj: unknown): obj is DevPodConfig {
+  if (obj && typeof obj === 'object') {
+    const cfg = obj as Record<string, unknown>;
+    return typeof cfg.endpoint === 'string' && typeof cfg.registry === 'string';
+  }
+  return false;
+}
+
 export class ConfigManager {
   private static instance: ConfigManager;
 
@@ -28,9 +41,17 @@ export class ConfigManager {
   load(): DevPodConfig {
     try {
       const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
-      return JSON.parse(data);
-    } catch {
-      return { endpoint: '', registry: '' };
+      const parsed = JSON.parse(data);
+      if (isDevPodConfig(parsed)) {
+        return parsed;
+      }
+      console.warn('Invalid config format, using defaults');
+      return { ...defaultConfig };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn('Failed to load config:', error);
+      }
+      return { ...defaultConfig };
     }
   }
 
@@ -39,13 +60,11 @@ export class ConfigManager {
   }
 
   getEndpoint(): string {
-    const cfg = this.load();
-    return cfg.endpoint;
+    return this.load().endpoint;
   }
 
   getRegistry(): string {
-    const cfg = this.load();
-    return cfg.registry || 'localhost:5000';
+    return this.load().registry;
   }
 }
 
