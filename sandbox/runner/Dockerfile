@@ -11,10 +11,10 @@ WORKDIR /app
 # Install git for go mod download
 RUN apk add --no-cache git
 
-COPY apps/runner/go.mod ./
+COPY sandbox/runner/go.mod ./
 RUN GOPROXY=$GOPROXY go mod download
 
-COPY apps/runner/ .
+COPY sandbox/runner/ .
 
 # Build the binary (go mod tidy to fix missing sum entries)
 RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o runner ./cmd
@@ -31,10 +31,10 @@ WORKDIR /app
 # Install git for go mod download
 RUN apk add --no-cache git
 
-COPY apps/agent/go.mod ./
+COPY sandbox/agent/go.mod ./
 RUN GOSUMDB=$GOSUMDB GOPROXY=$GOPROXY go mod download
 
-COPY apps/agent/ .
+COPY sandbox/agent/ .
 
 # Build agent binary (go mod tidy to generate go.sum if needed)
 RUN GOSUMDB=$GOSUMDB GOPROXY=$GOPROXY go mod tidy && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -installsuffix cgo -o agent ./cmd
