@@ -3,7 +3,7 @@ version: '3.8'
 services:
   server:
     build:
-      context: ../apps/server
+      context: ../sandbox/server
       dockerfile: Dockerfile
       args:
         - NPM_REGISTRY=https://registry.npmmirror.com
@@ -29,7 +29,7 @@ services:
   runner:
     build:
       context: ..
-      dockerfile: apps/runner/Dockerfile
+      dockerfile: sandbox/runner/Dockerfile
       args:
         - GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
     container_name: codepod-runner
