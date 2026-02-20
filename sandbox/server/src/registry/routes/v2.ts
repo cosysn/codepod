@@ -18,7 +18,7 @@ function getRegistry(): RegistryService {
   return registry;
 }
 
-// GET /v2/ - API version check
+// GET /v2 - API version check (mounted at /v2)
 router.get('/', async (req: Request, res: Response) => {
   res.set('Docker-Distribution-API-Version', 'registry/2.0');
   res.json({
@@ -144,8 +144,9 @@ router.get('/:name/blobs/:digest', async (req: Request, res: Response) => {
   }
 });
 
-// POST /v2/<name>/blobs/uploads/ - Initiate blob upload
-router.post('/:name/blobs/uploads/', async (req: Request, res: Response) => {
+// POST /v2/<name>/blobs/uploads/?_projection - Initiate blob upload
+// Note: Express regex ? doesn't work with params, use optional trailing slash via regex
+router.post('/:name/blobs/uploads/?', async (req: Request, res: Response) => {
   const { name } = req.params;
   const uploadId = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
@@ -158,7 +159,7 @@ router.post('/:name/blobs/uploads/', async (req: Request, res: Response) => {
   });
 });
 
-// PUT /v2/<name>/blobs/uploads/<id> - Upload blob
+// PUT /v2/<name>/blobs/uploads/<id>?digest=<sha> - Upload blob
 router.put('/:name/blobs/uploads/:id', async (req: Request, res: Response) => {
   try {
     const { name, id } = req.params;

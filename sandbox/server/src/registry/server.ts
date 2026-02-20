@@ -11,6 +11,18 @@ const HOST = process.env.CODEPOD_REGISTRY_HOST || '0.0.0.0';
 
 const app = express();
 
+// Handle optional trailing slashes for Docker compatibility
+// Docker expects /v2/ with trailing slash
+app.use((req, res, next) => {
+  // Skip if already correct path
+  if (req.path === '/' || !req.path.endsWith('/')) {
+    return next();
+  }
+  // For /v2/ specifically, Docker client expects it WITH trailing slash
+  // So we don't redirect - we let it pass through
+  next();
+});
+
 // Enable raw body parsing for blob uploads
 app.use(express.raw({ type: '*/*', limit: '10gb' }));
 
