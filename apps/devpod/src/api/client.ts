@@ -16,6 +16,19 @@ const WORKSPACES_DIR = path.join(
   'workspaces'
 );
 
+function isWorkspaceMeta(obj: unknown): obj is WorkspaceMeta {
+  if (obj && typeof obj === 'object') {
+    const meta = obj as Record<string, unknown>;
+    return (
+      typeof meta.name === 'string' &&
+      typeof meta.id === 'string' &&
+      typeof meta.createdAt === 'string' &&
+      typeof meta.status === 'string'
+    );
+  }
+  return false;
+}
+
 export class APIClient {
   private client: AxiosInstance;
 
@@ -23,11 +36,24 @@ export class APIClient {
     const config = configManager.load();
     const baseURL = endpoint || config.endpoint;
 
+    if (!baseURL) {
+      throw new Error('API endpoint not configured. Run: devpod config set endpoint <url>');
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+
+    // Add API key if configured
+    const apiKey = process.env.CODEPOD_API_KEY;
+    if (apiKey) {
+      headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+
     this.client = axios.create({
       baseURL,
-      headers: {
-        'Content-Type': 'application/json'
-      }
+      headers,
+      timeout: 30000
     });
   }
 
@@ -86,8 +112,16 @@ export class APIClient {
     try {
       const file = path.join(WORKSPACES_DIR, `${name}.json`);
       const data = fs.readFileSync(file, 'utf-8');
-      return JSON.parse(data);
-    } catch {
+      const parsed = JSON.parse(data);
+      if (isWorkspaceMeta(parsed)) {
+        return parsed;
+      }
+      console.warn(`Invalid workspace metadata for: ${name}`);
+      return null;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn('Failed to load workspace metadata:', error);
+      }
       return null;
     }
   }
@@ -109,8 +143,10 @@ export class APIClient {
     const file = path.join(WORKSPACES_DIR, `${name}.json`);
     try {
       fs.unlinkSync(file);
-    } catch {
-      // Ignore if file doesn't exist
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        console.warn('Failed to delete workspace metadata:', error);
+      }
     }
   }
 }
