@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/codepod/codepod/apps/runner/internal/runner"
+	"github.com/codepod/codepod/sandbox/runner/internal/runner"
 )
 
 func main() {
