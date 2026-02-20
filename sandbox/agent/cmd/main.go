@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/codepod/codepod/apps/agent/pkg/config"
-	"github.com/codepod/codepod/apps/agent/pkg/reporter"
-	"github.com/codepod/codepod/apps/agent/pkg/ssh"
+	"github.com/codepod/codepod/sandbox/agent/pkg/config"
+	"github.com/codepod/codepod/sandbox/agent/pkg/reporter"
+	"github.com/codepod/codepod/sandbox/agent/pkg/ssh"
 )
 
 // generateSSHHostKeys generates SSH host keys if they don't exist

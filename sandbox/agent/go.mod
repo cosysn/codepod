@@ -1,4 +1,4 @@
-module github.com/codepod/codepod/apps/agent
+module github.com/codepod/codepod/sandbox/agent
 
 go 1.21
 
