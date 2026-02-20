@@ -63,6 +63,17 @@ export async function createSandbox(
 }
 
 /**
+ * Create a sandbox and wait for it to be running (E2B-style)
+ */
+export async function createSandboxAndWait(
+  req: Parameters<CodePodClient['createSandbox']>[0],
+  timeout: number = 120
+): Promise<Sandbox> {
+  const client = getSDKClient();
+  return client.createSandboxAndWait(req, timeout);
+}
+
+/**
  * Get a sandbox by ID
  */
 export async function getSandbox(id: string): Promise<Sandbox | null> {

@@ -1,6 +1,7 @@
 import { Sandbox } from '@codepod/sdk-ts';
 import {
   createSandbox,
+  createSandboxAndWait,
   getSandbox,
   deleteSandbox,
   stopSandbox,
@@ -51,16 +52,17 @@ export class WorkspaceManager {
     console.log(`Volume created: ${volume.volumeId}`);
     console.log('');
 
-    // Step 2: Create builder sandbox
+    // Step 2: Create builder sandbox and wait for it to be running
     console.log('Creating builder sandbox...');
-    const builder = await createSandbox({
+    const builder = await createSandboxAndWait({
       name: `devpod-${name}-builder`,
       image: this.builderImage,
       cpu: options.builderCpu || 2,
       memory: options.builderMemory || '4Gi',
       volumes: [{ volumeId: volume.volumeId, mountPath: '/workspace' }]
-    });
+    }, 180); // 3 minutes timeout
     console.log(`Builder sandbox created: ${builder.id}`);
+    console.log(`Builder SSH: ${builder.host}:${builder.port}`);
     console.log('');
 
     // Save metadata
@@ -89,16 +91,17 @@ export class WorkspaceManager {
       meta.builderSandboxId = undefined;
       console.log('');
 
-      // Step 5: Create dev sandbox
+      // Step 5: Create dev sandbox and wait for it to be running
       console.log('Creating dev sandbox...');
-      const dev = await createSandbox({
+      const dev = await createSandboxAndWait({
         name: `devpod-${name}`,
         image: `${this.registry}/devpod/${name}:latest`,
         cpu: options.devCpu || 2,
         memory: options.devMemory || '4Gi',
         volumes: [{ volumeId: volume.volumeId, mountPath: '/workspace' }]
-      });
+      }, 180);
       console.log(`Dev sandbox created: ${dev.id}`);
+      console.log(`Dev SSH: ${dev.host}:${dev.port}`);
       console.log('');
 
       // Update metadata
