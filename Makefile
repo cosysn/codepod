@@ -1,7 +1,7 @@
 # CodePod Build System
 # All build outputs go to build/ directory
 
-.PHONY: all clean build build-sdk build-agent build-agent-amd64 build-agent-arm64 build-runner build-server build-cli test help docker-up docker-down docker-logs docker-status
+.PHONY: all clean build build-sdk build-agent build-agent-amd64 build-agent-arm64 build-runner build-server build-cli test help docker-up docker-down docker-logs docker-status build-devpod devpod-publish-builder clean-devpod
 
 # Directory structure
 BUILD_DIR := build
@@ -226,3 +226,19 @@ docker-restart:
 	@echo "Restarting CodePod services..."
 	cd $(DOCKER_DIR) && docker-compose down && docker-compose up -d
 	@echo "Services restarted!"
+
+# DevPod targets
+build-devpod:
+	@echo "Building DevPod..."
+	cd apps/devpod && npm install && npm run build
+
+devpod-publish-builder:
+	@echo "Building and publishing builder image..."
+	docker build -t codepod/builder:latest ./apps/devpod/builder
+	docker tag codepod/builder:latest localhost:5000/codepod/builder:latest
+	docker push localhost:5000/codepod/builder:latest
+
+clean-devpod:
+	@echo "Cleaning DevPod..."
+	rm -rf apps/devpod/dist
+	rm -rf apps/devpod/node_modules

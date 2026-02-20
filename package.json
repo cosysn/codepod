@@ -1,0 +1,9 @@
+{
+  "name": "devpod-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "devpod:build": "cd apps/devpod && npm run build",
+    "devpod:install": "cd apps/devpod && npm install"
+  }
+}

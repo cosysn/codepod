@@ -1,0 +1,26 @@
+{
+  "name": "devpod",
+  "version": "0.1.0",
+  "description": "Development environment manager using CodePod Sandbox",
+  "main": "dist/index.js",
+  "bin": {
+    "devpod": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "commander": "^11.1.0",
+    "inquirer": "^9.2.0",
+    "ssh2": "^1.15.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ssh2": "^1.15.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.0.0"
+  }
+}
