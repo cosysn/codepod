@@ -1,6 +1,20 @@
-import { APIClient, getAPIClient } from '../api/client';
+import { Sandbox } from '@codepod/sdk-ts';
+import {
+  createSandbox,
+  getSandbox,
+  deleteSandbox,
+  stopSandbox,
+  startSandbox,
+  getSandboxToken,
+  createVolume,
+  deleteVolume,
+  saveWorkspaceMeta,
+  loadWorkspaceMeta,
+  deleteWorkspaceMeta,
+  listWorkspaces
+} from '../api/client';
 import { SSHService } from '../services/ssh';
-import { WorkspaceMeta, Sandbox, Volume } from '../types';
+import { WorkspaceMeta } from '../types';
 import { configManager } from '../config';
 
 export interface BuildOptions {
@@ -16,11 +30,9 @@ export interface BuildOptions {
 export class WorkspaceManager {
   private builderImage = 'codepod/builder:latest';
   private registry: string;
-  private client: APIClient;
 
-  constructor(client?: APIClient) {
+  constructor() {
     this.registry = configManager.getRegistry();
-    this.client = client || getAPIClient();
   }
 
   async create(options: BuildOptions): Promise<void> {
@@ -32,7 +44,7 @@ export class WorkspaceManager {
 
     // Step 1: Create volume
     console.log('Creating shared volume...');
-    const volume = await this.client.createVolume({
+    const volume = await createVolume({
       name: `devpod-${name}`,
       size: '10Gi'
     });
@@ -41,7 +53,7 @@ export class WorkspaceManager {
 
     // Step 2: Create builder sandbox
     console.log('Creating builder sandbox...');
-    const builder = await this.client.createSandbox({
+    const builder = await createSandbox({
       name: `devpod-${name}-builder`,
       image: this.builderImage,
       cpu: options.builderCpu || 2,
@@ -62,7 +74,7 @@ export class WorkspaceManager {
       gitUrl: repoUrl,
       imageRef: `${this.registry}/devpod/${name}:latest`
     };
-    this.client.saveWorkspaceMeta(meta);
+    saveWorkspaceMeta(meta);
 
     try {
       // Step 3: Build image
@@ -73,13 +85,13 @@ export class WorkspaceManager {
 
       // Step 4: Delete builder
       console.log('Cleaning up builder...');
-      await this.client.deleteSandbox(builder.id);
+      await deleteSandbox(builder.id);
       meta.builderSandboxId = undefined;
       console.log('');
 
       // Step 5: Create dev sandbox
       console.log('Creating dev sandbox...');
-      const dev = await this.client.createSandbox({
+      const dev = await createSandbox({
         name: `devpod-${name}`,
         image: `${this.registry}/devpod/${name}:latest`,
         cpu: options.devCpu || 2,
@@ -93,7 +105,7 @@ export class WorkspaceManager {
       meta.devSandboxId = dev.id;
       meta.imageRef = `${this.registry}/devpod/${name}:latest`;
       meta.status = 'running';
-      this.client.saveWorkspaceMeta(meta);
+      saveWorkspaceMeta(meta);
 
       console.log('Workspace ready!');
       console.log(`Sandbox: ${dev.id}`);
@@ -103,23 +115,23 @@ export class WorkspaceManager {
       // Cleanup on failure
       console.error('Build failed:', error);
       try {
-        await this.client.deleteSandbox(builder.id);
-        await this.client.deleteVolume(volume.volumeId);
+        await deleteSandbox(builder.id);
+        await deleteVolume(volume.volumeId);
       } catch (e) {
         // Ignore cleanup errors
       }
-      this.client.deleteWorkspaceMeta(name);
+      deleteWorkspaceMeta(name);
       throw error;
     }
   }
 
   private async buildImage(
     sandbox: Sandbox,
-    _volumeId: string,
+    volumeId: string,
     options: BuildOptions
   ): Promise<void> {
     // Connect to builder
-    const token = await this.client.getToken(sandbox.id);
+    const token = await getSandboxToken(sandbox.id);
     const ssh = await SSHService.connectWithPassword(
       sandbox.host,
       sandbox.port,
@@ -153,7 +165,7 @@ export class WorkspaceManager {
   }
 
   async list(): Promise<void> {
-    const workspaces = this.client.listWorkspaces();
+    const workspaces = listWorkspaces();
     if (workspaces.length === 0) {
       console.log('No workspaces found.');
       return;
@@ -162,7 +174,7 @@ export class WorkspaceManager {
     console.log('Workspaces:');
     console.log('---');
     for (const name of workspaces) {
-      const meta = this.client.loadWorkspaceMeta(name);
+      const meta = loadWorkspaceMeta(name);
       if (meta) {
         const status = meta.status || 'unknown';
         console.log(`${name} (${status}) - ${meta.gitUrl || 'no repo'}`);
@@ -171,7 +183,7 @@ export class WorkspaceManager {
   }
 
   async delete(name: string): Promise<void> {
-    const meta = this.client.loadWorkspaceMeta(name);
+    const meta = loadWorkspaceMeta(name);
     if (!meta) {
       console.log(`Workspace ${name} not found.`);
       return;
@@ -180,54 +192,54 @@ export class WorkspaceManager {
     // Delete dev sandbox
     if (meta.devSandboxId) {
       console.log('Deleting dev sandbox...');
-      await this.client.deleteSandbox(meta.devSandboxId);
+      await deleteSandbox(meta.devSandboxId);
     }
 
     // Delete builder sandbox
     if (meta.builderSandboxId) {
       console.log('Deleting builder sandbox...');
-      await this.client.deleteSandbox(meta.builderSandboxId);
+      await deleteSandbox(meta.builderSandboxId);
     }
 
     // Delete volume
     if (meta.volumeId) {
       console.log('Deleting volume...');
-      await this.client.deleteVolume(meta.volumeId);
+      await deleteVolume(meta.volumeId);
     }
 
     // Delete metadata
-    this.client.deleteWorkspaceMeta(name);
+    deleteWorkspaceMeta(name);
     console.log(`Workspace ${name} deleted.`);
   }
 
   async stop(name: string): Promise<void> {
-    const meta = this.client.loadWorkspaceMeta(name);
+    const meta = loadWorkspaceMeta(name);
     if (!meta || !meta.devSandboxId) {
       console.log(`Workspace ${name} not found or not running.`);
       return;
     }
 
-    await this.client.stopSandbox(meta.devSandboxId);
+    await stopSandbox(meta.devSandboxId);
     meta.status = 'stopped';
-    this.client.saveWorkspaceMeta(meta);
+    saveWorkspaceMeta(meta);
     console.log(`Workspace ${name} stopped.`);
   }
 
   async start(name: string): Promise<void> {
-    const meta = this.client.loadWorkspaceMeta(name);
+    const meta = loadWorkspaceMeta(name);
     if (!meta || !meta.devSandboxId) {
       console.log(`Workspace ${name} not found.`);
       return;
     }
 
-    await this.client.startSandbox(meta.devSandboxId);
+    await startSandbox(meta.devSandboxId);
     meta.status = 'running';
-    this.client.saveWorkspaceMeta(meta);
+    saveWorkspaceMeta(meta);
     console.log(`Workspace ${name} started.`);
   }
 }
 
-// Singleton instance - lazily created
+// Singleton instance
 let workspaceManagerInstance: WorkspaceManager | null = null;
 
 export function getWorkspaceManager(): WorkspaceManager {

@@ -1,6 +1,11 @@
+/**
+ * API Client - Thin wrapper around CodePod SDK
+ * Re-exports SDK functionality with workspace metadata management
+ */
+
 import * as path from 'path';
 import * as fs from 'fs';
-import { CodePodClient, CreateVolumeRequest, CreateVolumeResponse, Sandbox } from '@codepod/sdk-ts';
+import { CodePodClient, Sandbox, CreateVolumeRequest, CreateVolumeResponse } from '@codepod/sdk-ts';
 import { configManager } from '../config';
 import { WorkspaceMeta } from '../types';
 
@@ -23,143 +28,150 @@ function isWorkspaceMeta(obj: unknown): obj is WorkspaceMeta {
   return false;
 }
 
-export class APIClient {
-  private client: CodePodClient | null = null;
+// Lazy SDK client singleton
+let sdkClient: CodePodClient | null = null;
 
-  constructor(endpoint?: string) {
+function getSDKClient(): CodePodClient {
+  if (!sdkClient) {
     const config = configManager.load();
-    const baseURL = endpoint || config.endpoint;
-
-    if (!baseURL) {
+    if (!config.endpoint) {
       throw new Error('API endpoint not configured. Run: devpod config set endpoint <url>');
     }
-
     const apiKey = process.env.CODEPOD_API_KEY;
-    this.client = new CodePodClient({
-      baseURL,
+    sdkClient = new CodePodClient({
+      baseURL: config.endpoint,
       apiKey,
       timeout: 30000
     });
   }
+  return sdkClient;
+}
 
-  getClient(): CodePodClient {
-    if (!this.client) {
-      const config = configManager.load();
-      const baseURL = config.endpoint;
+// Re-export from SDK
+export { CodePodClient, Sandbox, CreateVolumeRequest, CreateVolumeResponse };
+export type { CreateSandboxRequest } from '@codepod/sdk-ts';
 
-      if (!baseURL) {
-        throw new Error('API endpoint not configured. Run: devpod config set endpoint <url>');
-      }
+/**
+ * Create a sandbox and wrap in Sandbox class
+ */
+export async function createSandbox(
+  req: Parameters<CodePodClient['createSandbox']>[0]
+): Promise<Sandbox> {
+  const client = getSDKClient();
+  const response = await client.createSandbox(req);
+  return new Sandbox(client, response.sandbox);
+}
 
-      const apiKey = process.env.CODEPOD_API_KEY;
-      this.client = new CodePodClient({
-        baseURL,
-        apiKey,
-        timeout: 30000
-      });
-    }
-    return this.client;
-  }
-
-  // Sandbox operations
-  async createSandbox(req: { image: string; name?: string; cpu?: number; memory?: string; env?: Record<string, string>; timeout?: number; volumes?: { volumeId: string; mountPath: string }[] }): Promise<Sandbox> {
-    const response = await this.getClient().createSandbox(req);
-    return response.sandbox;
-  }
-
-  async getSandbox(id: string): Promise<Sandbox | null> {
-    try {
-      return await this.getClient().getSandbox(id);
-    } catch {
-      return null;
-    }
-  }
-
-  async deleteSandbox(id: string): Promise<void> {
-    await this.getClient().deleteSandbox(id);
-  }
-
-  async stopSandbox(id: string): Promise<void> {
-    await this.getClient().stopSandbox(id);
-  }
-
-  async startSandbox(id: string): Promise<void> {
-    // Start is not directly supported, use restart
-    await this.getClient().restartSandbox(id);
-  }
-
-  async getToken(id: string): Promise<string> {
-    const response = await this.getClient().getSandboxToken(id);
-    return response.token;
-  }
-
-  // Volume operations
-  async createVolume(req: CreateVolumeRequest): Promise<CreateVolumeResponse> {
-    return await this.getClient().createVolume(req);
-  }
-
-  async deleteVolume(id: string): Promise<void> {
-    await this.getClient().deleteVolume(id);
-  }
-
-  // Workspace metadata
-  saveWorkspaceMeta(meta: WorkspaceMeta): void {
-    if (!fs.existsSync(WORKSPACES_DIR)) {
-      fs.mkdirSync(WORKSPACES_DIR, { recursive: true });
-    }
-    const file = path.join(WORKSPACES_DIR, `${meta.name}.json`);
-    fs.writeFileSync(file, JSON.stringify(meta, null, 2));
-  }
-
-  loadWorkspaceMeta(name: string): WorkspaceMeta | null {
-    try {
-      const file = path.join(WORKSPACES_DIR, `${name}.json`);
-      const data = fs.readFileSync(file, 'utf-8');
-      const parsed = JSON.parse(data);
-      if (isWorkspaceMeta(parsed)) {
-        return parsed;
-      }
-      console.warn(`Invalid workspace metadata for: ${name}`);
-      return null;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.warn('Failed to load workspace metadata:', error);
-      }
-      return null;
-    }
-  }
-
-  listWorkspaces(): string[] {
-    try {
-      if (!fs.existsSync(WORKSPACES_DIR)) {
-        return [];
-      }
-      return fs.readdirSync(WORKSPACES_DIR)
-        .filter(f => f.endsWith('.json'))
-        .map(f => f.replace('.json', ''));
-    } catch {
-      return [];
-    }
-  }
-
-  deleteWorkspaceMeta(name: string): void {
-    const file = path.join(WORKSPACES_DIR, `${name}.json`);
-    try {
-      fs.unlinkSync(file);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        console.warn('Failed to delete workspace metadata:', error);
-      }
-    }
+/**
+ * Get a sandbox by ID
+ */
+export async function getSandbox(id: string): Promise<Sandbox | null> {
+  try {
+    const client = getSDKClient();
+    const sandbox = await client.getSandbox(id);
+    return new Sandbox(client, sandbox);
+  } catch {
+    return null;
   }
 }
 
-// Singleton instance - lazily created
-let apiClientInstance: APIClient | null = null;
+/**
+ * Delete a sandbox
+ */
+export async function deleteSandbox(id: string): Promise<void> {
+  const client = getSDKClient();
+  await client.deleteSandbox(id);
+}
 
-export function getAPIClient(): APIClient {
-  if (!apiClientInstance) {
-    apiClientInstance = new APIClient();
+/**
+ * Stop a sandbox
+ */
+export async function stopSandbox(id: string): Promise<void> {
+  const client = getSDKClient();
+  await client.stopSandbox(id);
+}
+
+/**
+ * Start/restart a sandbox
+ */
+export async function startSandbox(id: string): Promise<void> {
+  const client = getSDKClient();
+  await client.restartSandbox(id);
+}
+
+/**
+ * Get sandbox token
+ */
+export async function getSandboxToken(id: string): Promise<string> {
+  const client = getSDKClient();
+  const response = await client.getSandboxToken(id);
+  return response.token;
+}
+
+/**
+ * Create a volume
+ */
+export async function createVolume(req: CreateVolumeRequest): Promise<CreateVolumeResponse> {
+  const client = getSDKClient();
+  return client.createVolume(req);
+}
+
+/**
+ * Delete a volume
+ */
+export async function deleteVolume(id: string): Promise<void> {
+  const client = getSDKClient();
+  await client.deleteVolume(id);
+}
+
+// ==================== Workspace Metadata ====================
+
+export function saveWorkspaceMeta(meta: WorkspaceMeta): void {
+  if (!fs.existsSync(WORKSPACES_DIR)) {
+    fs.mkdirSync(WORKSPACES_DIR, { recursive: true });
   }
-  return apiClientInstance;
+  const file = path.join(WORKSPACES_DIR, `${meta.name}.json`);
+  fs.writeFileSync(file, JSON.stringify(meta, null, 2));
+}
+
+export function loadWorkspaceMeta(name: string): WorkspaceMeta | null {
+  try {
+    const file = path.join(WORKSPACES_DIR, `${name}.json`);
+    const data = fs.readFileSync(file, 'utf-8');
+    const parsed = JSON.parse(data);
+    if (isWorkspaceMeta(parsed)) {
+      return parsed;
+    }
+    console.warn(`Invalid workspace metadata for: ${name}`);
+    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn('Failed to load workspace metadata:', error);
+    }
+    return null;
+  }
+}
+
+export function listWorkspaces(): string[] {
+  try {
+    if (!fs.existsSync(WORKSPACES_DIR)) {
+      return [];
+    }
+    return fs.readdirSync(WORKSPACES_DIR)
+      .filter(f => f.endsWith('.json'))
+      .map(f => f.replace('.json', ''));
+  } catch {
+    return [];
+  }
+}
+
+export function deleteWorkspaceMeta(name: string): void {
+  const file = path.join(WORKSPACES_DIR, `${name}.json`);
+  try {
+    fs.unlinkSync(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      console.warn('Failed to delete workspace metadata:', error);
+    }
+  }
 }

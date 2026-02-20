@@ -1,6 +1,7 @@
-import { APIClient, getAPIClient } from '../api/client';
 import * as fs from 'fs';
 import * as childProcess from 'child_process';
+import { getSandbox, getSandboxToken } from '../api/client';
+import { Sandbox } from '@codepod/sdk-ts';
 
 export interface VSCodeConnectOptions {
   sandboxId: string;
@@ -8,14 +9,8 @@ export interface VSCodeConnectOptions {
 }
 
 export class VSCodeConnector {
-  private client: APIClient;
-
-  constructor(client?: APIClient) {
-    this.client = client || getAPIClient();
-  }
-
   async connect(options: VSCodeConnectOptions): Promise<void> {
-    const sandbox = await this.client.getSandbox(options.sandboxId);
+    const sandbox = await getSandbox(options.sandboxId);
     if (!sandbox) {
       throw new Error(`Sandbox ${options.sandboxId} not found`);
     }
@@ -24,7 +19,7 @@ export class VSCodeConnector {
       throw new Error(`Sandbox ${options.sandboxId} is not running`);
     }
 
-    const token = await this.client.getToken(sandbox.id);
+    const token = await getSandboxToken(sandbox.id);
 
     // Get or generate SSH key for VS Code
     let privateKey = process.env.SSH_KEY;
@@ -40,9 +35,6 @@ export class VSCodeConnector {
         throw new Error('Failed to generate SSH key. Please set SSH_KEY and SSH_KEY_PUB environment variables.');
       }
     }
-
-    // Upload public key to sandbox (this requires sandbox support)
-    // For now, we use password authentication with token
 
     // Build VS Code remote command
     const workspaceArg = options.workspacePath || '/workspace';
