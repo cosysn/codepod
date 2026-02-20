@@ -41,7 +41,7 @@ describe('Docker Registry V2 API', () => {
     // Set up Express app
     app = express();
     app.use(express.json());
-    app.use('/v2', v2Router);
+    app.use('/registry/v2', v2Router);
   });
 
   afterAll(() => {
@@ -49,47 +49,47 @@ describe('Docker Registry V2 API', () => {
     fs.rmSync(testRoot, { recursive: true, force: true });
   });
 
-  describe('GET /v2/', () => {
+  describe('GET /registry/v2/', () => {
     test('should return API version info', async () => {
-      const response = await request(app).get('/v2/');
+      const response = await request(app).get('/registry/v2/');
       expect(response.status).toBe(200);
       expect(response.body.version).toBe('2.0');
       expect(response.body.name).toBe('codepod-registry');
     });
   });
 
-  describe('GET /v2/_catalog', () => {
+  describe('GET /registry/v2/_catalog', () => {
     test('should return repositories', async () => {
-      const response = await request(app).get('/v2/_catalog');
+      const response = await request(app).get('/registry/v2/_catalog');
       expect(response.status).toBe(200);
       expect(response.body.repositories).toContain('test-image');
     });
   });
 
-  describe('GET /v2/<name>/tags/list', () => {
+  describe('GET /registry/v2/<name>/tags/list', () => {
     test('should return tags for image', async () => {
-      const response = await request(app).get('/v2/test-image/tags/list');
+      const response = await request(app).get('/registry/v2/test-image/tags/list');
       expect(response.status).toBe(200);
       expect(response.body.name).toBe('test-image');
       expect(response.body.tags).toContain('latest');
     });
 
     test('should return 404 for non-existent image', async () => {
-      const response = await request(app).get('/v2/nonexistent/tags/list');
+      const response = await request(app).get('/registry/v2/nonexistent/tags/list');
       expect(response.status).toBe(404);
     });
   });
 
-  describe('GET /v2/<name>/manifests/<ref>', () => {
+  describe('GET /registry/v2/<name>/manifests/<ref>', () => {
     test('should return manifest', async () => {
-      const response = await request(app).get('/v2/test-image/manifests/latest');
+      const response = await request(app).get('/registry/v2/test-image/manifests/latest');
       expect(response.status).toBe(200);
       expect(response.body.schemaVersion).toBe(2);
       expect(response.body.layers).toBeDefined();
     });
   });
 
-  describe('HEAD /v2/<name>/blobs/<digest>', () => {
+  describe('HEAD /registry/v2/<name>/blobs/<digest>', () => {
     test('should return 200 for existing blob', async () => {
       // First push a blob
       const registry = new RegistryService(testRoot);
@@ -97,7 +97,7 @@ describe('Docker Registry V2 API', () => {
       const digest = await registry.storeBlob(content);
 
       const response = await request(app)
-        .head(`/v2/test-image/blobs/${digest}`)
+        .head(`/registry/v2/test-image/blobs/${digest}`)
         .set('Accept', 'application/json');
 
       expect(response.status).toBe(200);
@@ -105,17 +105,17 @@ describe('Docker Registry V2 API', () => {
 
     test('should return 404 for non-existent blob', async () => {
       const response = await request(app)
-        .head('/v2/test-image/blobs/sha256:nonexistent12345678901234567890123456789012345678901234')
+        .head('/registry/v2/test-image/blobs/sha256:nonexistent12345678901234567890123456789012345678901234')
         .set('Accept', 'application/json');
 
       expect(response.status).toBe(404);
     });
   });
 
-  describe('POST /v2/<name>/blobs/uploads/', () => {
+  describe('POST /registry/v2/<name>/blobs/uploads/', () => {
     test('should initiate blob upload', async () => {
       const response = await request(app)
-        .post('/v2/test-image/blobs/uploads/')
+        .post('/registry/v2/test-image/blobs/uploads/')
         .set('Content-Type', 'application/json')
         .send({});
 
@@ -124,12 +124,12 @@ describe('Docker Registry V2 API', () => {
     });
   });
 
-  describe('PUT /v2/<name>/blobs/uploads/<id>', () => {
+  describe('PUT /registry/v2/<name>/blobs/uploads/<id>', () => {
     test('should upload blob', async () => {
       const content = Buffer.from('uploaded content');
 
       const response = await request(app)
-        .put('/v2/test-image/blobs/uploads/test-id')
+        .put('/registry/v2/test-image/blobs/uploads/test-id')
         .set('Content-Type', 'application/octet-stream')
         .send(content);
 
@@ -138,14 +138,14 @@ describe('Docker Registry V2 API', () => {
     });
   });
 
-  describe('DELETE /v2/<name>/manifests/<ref>', () => {
+  describe('DELETE /registry/v2/<name>/manifests/<ref>', () => {
     test('should delete manifest', async () => {
       // First add a test manifest
       const registry = new RegistryService(testRoot);
       const manifest = { schemaVersion: 2, layers: [] };
       await registry.pushManifest('test-image', 'to-delete', manifest as any);
 
-      const response = await request(app).delete('/v2/test-image/manifests/to-delete');
+      const response = await request(app).delete('/registry/v2/test-image/manifests/to-delete');
       expect(response.status).toBe(202);
     });
   });
