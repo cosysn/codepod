@@ -19,7 +19,7 @@ describe('Registry Server Integration', () => {
     app.use(express.json());
     app.use('/api/v1/registry/images', imagesRouter);
     app.use('/api/v1/registry/tags', tagsRouter);
-    app.use('/v2', v2Router);
+    app.use('/registry/v2', v2Router);
     app.get('/health', (req, res) => {
       res.json({ status: 'healthy', module: 'registry' });
     });
@@ -52,20 +52,20 @@ describe('Registry Server Integration', () => {
 
       // Push via V2 API
       const pushRes = await request(app)
-        .put('/v2/test-image/manifests/latest')
+        .put('/registry/v2/test-image/manifests/latest')
         .set('Content-Type', 'application/json')
         .send(manifest);
       expect(pushRes.status).toBe(201);
 
       // Pull via V2 API
       const pullRes = await request(app)
-        .get('/v2/test-image/manifests/latest')
+        .get('/registry/v2/test-image/manifests/latest')
         .set('Accept', 'application/json');
       expect(pullRes.status).toBe(200);
       expect(pullRes.body).toEqual(manifest);
 
       // List via catalog
-      const catalogRes = await request(app).get('/v2/_catalog');
+      const catalogRes = await request(app).get('/registry/v2/_catalog');
       expect(catalogRes.status).toBe(200);
       expect(catalogRes.body.repositories).toContain('test-image');
 

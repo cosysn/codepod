@@ -27,7 +27,7 @@ describe('Registry E2E', () => {
     app.use(express.json());
     app.use('/api/v1/registry/images', imagesRouter);
     app.use('/api/v1/registry/tags', tagsRouter);
-    app.use('/v2', v2Router);
+    app.use('/registry/v2', v2Router);
   });
 
   afterAll(() => {
@@ -56,7 +56,7 @@ describe('Registry E2E', () => {
 
       // Push via V2 API
       const pushRes = await request(app)
-        .put('/v2/e2e-test/manifests/latest')
+        .put('/registry/v2/e2e-test/manifests/latest')
         .set('Content-Type', 'application/json')
         .send(manifest);
       expect(pushRes.status).toBe(201);
@@ -76,20 +76,20 @@ describe('Registry E2E', () => {
 
       // First push
       await request(app)
-        .put('/v2/pull-test/manifests/v1.0')
+        .put('/registry/v2/pull-test/manifests/v1.0')
         .set('Content-Type', 'application/json')
         .send(manifest);
 
       // Then pull
       const pullRes = await request(app)
-        .get('/v2/pull-test/manifests/v1.0')
+        .get('/registry/v2/pull-test/manifests/v1.0')
         .set('Accept', 'application/json');
       expect(pullRes.status).toBe(200);
       expect(pullRes.body).toEqual(manifest);
     });
 
     test('should list catalog via V2 API', async () => {
-      const catalogRes = await request(app).get('/v2/_catalog');
+      const catalogRes = await request(app).get('/registry/v2/_catalog');
       expect(catalogRes.status).toBe(200);
       expect(catalogRes.body.repositories).toBeDefined();
       expect(Array.isArray(catalogRes.body.repositories)).toBe(true);
@@ -111,12 +111,12 @@ describe('Registry E2E', () => {
       // First add a manifest to delete
       const manifest = { schemaVersion: 2, layers: [] };
       await request(app)
-        .put('/v2/delete-test/manifests/to-remove')
+        .put('/registry/v2/delete-test/manifests/to-remove')
         .set('Content-Type', 'application/json')
         .send(manifest);
 
       // Delete
-      const deleteRes = await request(app).delete('/v2/delete-test/manifests/to-remove');
+      const deleteRes = await request(app).delete('/registry/v2/delete-test/manifests/to-remove');
       expect(deleteRes.status).toBe(202);
     });
 
@@ -129,7 +129,7 @@ describe('Registry E2E', () => {
 
       // Upload via PUT (simulating completed upload)
       const uploadRes = await request(app)
-        .put('/v2/blob-test/manifests/v1')
+        .put('/registry/v2/blob-test/manifests/v1')
         .set('Content-Type', 'application/json')
         .send({
           schemaVersion: 2,
