@@ -17,6 +17,7 @@ import {
 import { SSHService } from '../services/ssh';
 import { WorkspaceMeta } from '../types';
 import { configManager } from '../config';
+import { ImageResolver } from '../image';
 
 export interface BuildOptions {
   repoUrl: string;
@@ -26,14 +27,23 @@ export interface BuildOptions {
   builderMemory?: string;
   devCpu?: number;
   devMemory?: string;
+  devImage?: string; // Optional dev container image to use
 }
 
 export class WorkspaceManager {
-  private builderImage = 'codepod/builder:latest';
+  private builderImage: string;
   private registry: string;
+  private imageResolver: ImageResolver;
 
   constructor() {
     this.registry = configManager.getRegistry();
+    this.builderImage = `${this.registry}/codepod/builder:latest`;
+    this.imageResolver = new ImageResolver({
+      preferCache: true,
+      cacheRegistry: this.registry,
+      fallbackRegistries: ['docker.io'],
+      prefixMappings: {},
+    });
   }
 
   async create(options: BuildOptions): Promise<void> {
@@ -93,9 +103,20 @@ export class WorkspaceManager {
 
       // Step 5: Create dev sandbox and wait for it to be running
       console.log('Creating dev sandbox...');
+
+      // Resolve dev image using ImageResolver if specified
+      let devImage: string;
+      if (options.devImage) {
+        const resolved = await this.imageResolver.getImage(options.devImage);
+        devImage = resolved.fullName;
+        console.log(`Using resolved dev image: ${devImage}`);
+      } else {
+        devImage = `${this.registry}/devpod/${name}:latest`;
+      }
+
       const dev = await createSandboxAndWait({
         name: `devpod-${name}`,
-        image: `${this.registry}/devpod/${name}:latest`,
+        image: devImage,
         cpu: options.devCpu || 2,
         memory: options.devMemory || '4Gi',
         volumes: [{ volumeId: volume.volumeId, mountPath: '/workspace' }]
@@ -148,18 +169,19 @@ export class WorkspaceManager {
       const cloneCmd = `git clone --depth 1 ${options.repoUrl} /workspace/repo`;
       await ssh.exec(cloneCmd);
 
-      // Build image
+      // Build image - use 127.0.0.1 for registry inside container (registry runs on host network)
       const dockerfilePath = options.dockerfilePath || '/workspace/repo/.devcontainer/Dockerfile';
-      const buildCmd = `cd /workspace && docker build -f ${dockerfilePath} -t ${this.registry}/devpod/${options.name}:latest /workspace/repo`;
+      const buildRegistry = this.registry.replace('localhost', '127.0.0.1').replace('host.docker.internal', '127.0.0.1');
+      const buildCmd = `cd /workspace && docker build -f ${dockerfilePath} -t ${buildRegistry}/devpod/${options.name}:latest /workspace/repo`;
 
       console.log('Building Docker image...');
       await ssh.execStream(buildCmd, (data) => {
         process.stdout.write(data);
       });
 
-      // Push image
+      // Push image - use 127.0.0.1 for registry inside container
       console.log('Pushing image...');
-      const pushCmd = `docker push ${this.registry}/devpod/${options.name}:latest`;
+      const pushCmd = `docker push ${buildRegistry}/devpod/${options.name}:latest`;
       await ssh.exec(pushCmd);
 
     } finally {
