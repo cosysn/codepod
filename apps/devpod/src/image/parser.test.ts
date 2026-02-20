@@ -23,6 +23,7 @@ describe('ImageParser', () => {
 
   test('should parse image without tag (default to latest)', () => {
     const result = parser.parse('python');
+    expect(result.registry).toBe('docker.io');
     expect(result.repository).toBe('python');
     expect(result.tag).toBe('latest');
   });
@@ -35,7 +36,9 @@ describe('ImageParser', () => {
   });
 
   test('should build fullName from parts', () => {
-    const result = parser.parse('localhost:5000/my-app:v1');
-    expect(result.fullName).toBe('localhost:5000/my-app:v1');
+    expect(parser.parse('localhost:5000/my-app:v1').fullName).toBe('localhost:5000/my-app:v1');
+    expect(parser.parse('python:3.11').fullName).toBe('python:3.11');
+    expect(parser.parse('python').fullName).toBe('python:latest');
+    expect(parser.parse('gcr.io/my-project/my-app:v2').fullName).toBe('gcr.io/my-project/my-app:v2');
   });
 });
