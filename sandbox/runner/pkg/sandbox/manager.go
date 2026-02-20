@@ -10,7 +10,7 @@ import (
 	"path"
 	"time"
 
-	"github.com/codepod/codepod/apps/runner/pkg/docker"
+	"github.com/codepod/codepod/sandbox/runner/pkg/docker"
 )
 
 // Manager manages sandbox containers

@@ -1,8 +1,7 @@
 go 1.21
 
 use (
-	./apps/agent
-	./apps/runner
+	./libs/sdk-go
+	./sandbox/agent
+	./sandbox/runner
 )
-
-replace github.com/codepod/codepod/libs/sdk-go => ./libs/sdk-go

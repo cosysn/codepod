@@ -25,9 +25,9 @@ make build-cli
 make build-sdk
 
 # Development mode (run source directly)
-make dev-server      # cd apps/server && npm run dev
-make dev-cli        # cd apps/cli && npm run dev
-# Go components: cd apps/{agent,runner} && go run ./cmd
+make dev-server      # cd sandbox/server && npm run dev
+make dev-cli        # cd sandbox/cli && npm run dev
+# Go components: cd sandbox/{agent,runner} && go run ./cmd
 
 # Run all tests
 make test
@@ -39,10 +39,10 @@ make test-server
 make test-cli
 
 # Run tests for a single component
-cd apps/agent && go test ./...
-cd apps/runner && go test ./...
-cd apps/server && npm test
-cd apps/cli && npm test
+cd sandbox/agent && go test ./...
+cd sandbox/runner && go test ./...
+cd sandbox/server && npm test
+cd sandbox/cli && npm test
 
 # Docker development (Server runs on port 8080, gRPC on 50051)
 cd docker && docker-compose up -d
@@ -66,7 +66,7 @@ This project uses `go.work` to manage multi-module dependencies:
 ## Configuration
 
 - **CLI config**: `~/.codepod/config.json` (endpoint, API key)
-- **Server config**: Environment variables or `apps/server/.env`
+- **Server config**: Environment variables or `sandbox/server/.env`
 - **Build output**: `build/` directory contains all compiled binaries
 - **Docker data**: `docker/data/` for persistent volumes (SQLite)
 
@@ -118,7 +118,7 @@ This project uses `go.work` to manage multi-module dependencies:
 
 ## Core Subsystems
 
-### Agent (apps/agent/)
+### Agent (sandbox/agent/)
 - **Purpose**: SSH Server running as PID 1 in each Sandbox container (handles signal forwarding, zombie reaping)
 - **Key modules**:
   - `pkg/ssh/`: SSH server, session management, PTY
@@ -128,7 +128,7 @@ This project uses `go.work` to manage multi-module dependencies:
   - `pkg/reporter/`: Heartbeat and status reporting to Runner
 - **Authentication**: Token (from API), public key (optional), password (disabled by default)
 
-### Runner (apps/runner/)
+### Runner (sandbox/runner/)
 - **Purpose**: Sandbox lifecycle management, Docker operations, job scheduling
 - **Key modules**:
   - `pkg/scheduler/`: Job queue management, priority scheduling, retry policies
@@ -136,14 +136,14 @@ This project uses `go.work` to manage multi-module dependencies:
   - `pkg/sandbox/`: Sandbox creation/deletion with Agent injection
   - `pkg/storage/`: Volume and snapshot management
 
-### Server (apps/server/)
+### Server (sandbox/server/)
 - **Purpose**: REST API, Runner registry, resource quotas, webhooks, audit logs
 - **Key modules**:
   - `src/routes/`: REST endpoints for sandboxes, API keys, webhooks
   - `src/services/`: Business logic services
   - `src/grpc/`: gRPC Server for Runner communication
 
-### CLI (apps/cli/)
+### CLI (sandbox/cli/)
 - **Purpose**: Command-line client for sandbox management
 - **Key patterns**: Commander.js for CLI structure, ssh2 for SSH connections, config stored in `~/.codepod/config.json`
 

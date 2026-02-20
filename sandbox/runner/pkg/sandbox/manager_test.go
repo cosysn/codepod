@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codepod/codepod/apps/runner/pkg/docker"
+	"github.com/codepod/codepod/sandbox/runner/pkg/docker"
 )
 
 func TestNewManager(t *testing.T) {

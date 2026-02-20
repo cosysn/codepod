@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/codepod/codepod/apps/runner/pkg/config"
-	"github.com/codepod/codepod/apps/runner/pkg/docker"
-	"github.com/codepod/codepod/apps/runner/pkg/sandbox"
+	"github.com/codepod/codepod/sandbox/runner/pkg/config"
+	"github.com/codepod/codepod/sandbox/runner/pkg/docker"
+	"github.com/codepod/codepod/sandbox/runner/pkg/sandbox"
 	"github.com/google/uuid"
 )
 
