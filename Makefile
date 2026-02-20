@@ -6,10 +6,10 @@
 # Directory structure
 BUILD_DIR := build
 SDK_DIR := libs/sdk-go
-RUNNER_DIR := apps/runner
-AGENT_DIR := apps/agent
-SERVER_DIR := apps/server
-CLI_DIR := apps/cli
+RUNNER_DIR := sandbox/runner
+AGENT_DIR := sandbox/agent
+SERVER_DIR := sandbox/server
+CLI_DIR := sandbox/cli
 DOCKER_DIR := docker
 
 # Default target
@@ -187,16 +187,16 @@ dev-sdk:
 	@echo "SDK development mode - use go run in libs/sdk-go"
 
 dev-runner:
-	@echo "Runner development mode - use go run in apps/runner/cmd/runner"
+	@echo "Runner development mode - use go run in sandbox/runner/cmd/runner"
 
 dev-agent:
-	@echo "Agent development mode - use go run in apps/agent/cmd/agent"
+	@echo "Agent development mode - use go run in sandbox/agent/cmd/agent"
 
 dev-server:
-	@echo "Server development mode - use npm run dev in apps/server"
+	@echo "Server development mode - use npm run dev in sandbox/server"
 
 dev-cli:
-	@echo "CLI development mode - use npm run dev in apps/cli"
+	@echo "CLI development mode - use npm run dev in sandbox/cli"
 
 # Docker Targets
 docker-up:
