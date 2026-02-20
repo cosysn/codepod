@@ -1,9 +1,10 @@
 import { Command } from 'commander';
+import { workspaceManager } from '../workspace/manager';
 
-const list = new Command('list');
-list.description('List all development environments');
-list.action(() => {
-  console.log('list command - not yet implemented');
-});
+const list = new Command('list')
+  .description('List all workspaces')
+  .action(async () => {
+    await workspaceManager.list();
+  });
 
 export default list;
