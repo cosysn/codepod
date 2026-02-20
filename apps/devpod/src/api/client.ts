@@ -1,14 +1,8 @@
-import axios, { AxiosInstance } from 'axios';
 import * as path from 'path';
 import * as fs from 'fs';
+import { CodePodClient, CreateVolumeRequest, CreateVolumeResponse, Sandbox } from '@codepod/sdk-ts';
 import { configManager } from '../config';
-import {
-  Sandbox,
-  Volume,
-  CreateSandboxRequest,
-  CreateVolumeRequest,
-  WorkspaceMeta
-} from '../types';
+import { WorkspaceMeta } from '../types';
 
 const WORKSPACES_DIR = path.join(
   process.env.HOME || process.env.USERPROFILE || '/root',
@@ -30,33 +24,37 @@ function isWorkspaceMeta(obj: unknown): obj is WorkspaceMeta {
 }
 
 export class APIClient {
-  private client: AxiosInstance | null = null;
-  private baseURL: string;
+  private client: CodePodClient | null = null;
 
   constructor(endpoint?: string) {
     const config = configManager.load();
-    this.baseURL = endpoint || config.endpoint;
+    const baseURL = endpoint || config.endpoint;
 
-    if (!this.baseURL) {
+    if (!baseURL) {
       throw new Error('API endpoint not configured. Run: devpod config set endpoint <url>');
     }
+
+    const apiKey = process.env.CODEPOD_API_KEY;
+    this.client = new CodePodClient({
+      baseURL,
+      apiKey,
+      timeout: 30000
+    });
   }
 
-  private getClient(): AxiosInstance {
+  getClient(): CodePodClient {
     if (!this.client) {
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
-      };
+      const config = configManager.load();
+      const baseURL = config.endpoint;
 
-      // Add API key if configured
-      const apiKey = process.env.CODEPOD_API_KEY;
-      if (apiKey) {
-        headers['Authorization'] = `Bearer ${apiKey}`;
+      if (!baseURL) {
+        throw new Error('API endpoint not configured. Run: devpod config set endpoint <url>');
       }
 
-      this.client = axios.create({
-        baseURL: this.baseURL,
-        headers,
+      const apiKey = process.env.CODEPOD_API_KEY;
+      this.client = new CodePodClient({
+        baseURL,
+        apiKey,
         timeout: 30000
       });
     }
@@ -64,45 +62,44 @@ export class APIClient {
   }
 
   // Sandbox operations
-  async createSandbox(req: CreateSandboxRequest): Promise<Sandbox> {
-    const response = await this.getClient().post<Sandbox>('/api/v1/sandboxes', req);
-    return response.data;
+  async createSandbox(req: { image: string; name?: string; cpu?: number; memory?: string; env?: Record<string, string>; timeout?: number; volumes?: { volumeId: string; mountPath: string }[] }): Promise<Sandbox> {
+    const response = await this.getClient().createSandbox(req);
+    return response.sandbox;
   }
 
   async getSandbox(id: string): Promise<Sandbox | null> {
     try {
-      const response = await this.getClient().get<Sandbox>(`/api/v1/sandboxes/${id}`);
-      return response.data;
+      return await this.getClient().getSandbox(id);
     } catch {
       return null;
     }
   }
 
   async deleteSandbox(id: string): Promise<void> {
-    await this.getClient().delete(`/api/v1/sandboxes/${id}`);
+    await this.getClient().deleteSandbox(id);
   }
 
   async stopSandbox(id: string): Promise<void> {
-    await this.getClient().post(`/api/v1/sandboxes/${id}/stop`);
+    await this.getClient().stopSandbox(id);
   }
 
   async startSandbox(id: string): Promise<void> {
-    await this.getClient().post(`/api/v1/sandboxes/${id}/start`);
+    // Start is not directly supported, use restart
+    await this.getClient().restartSandbox(id);
   }
 
   async getToken(id: string): Promise<string> {
-    const response = await this.getClient().post<{ token: string }>(`/api/v1/sandboxes/${id}/token`);
-    return response.data.token;
+    const response = await this.getClient().getSandboxToken(id);
+    return response.token;
   }
 
   // Volume operations
-  async createVolume(req: CreateVolumeRequest): Promise<Volume> {
-    const response = await this.getClient().post<Volume>('/api/v1/volumes', req);
-    return response.data;
+  async createVolume(req: CreateVolumeRequest): Promise<CreateVolumeResponse> {
+    return await this.getClient().createVolume(req);
   }
 
   async deleteVolume(id: string): Promise<void> {
-    await this.getClient().delete(`/api/v1/volumes/${id}`);
+    await this.getClient().deleteVolume(id);
   }
 
   // Workspace metadata

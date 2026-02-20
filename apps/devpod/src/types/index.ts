@@ -1,12 +1,15 @@
+export type SandboxStatus = 'pending' | 'running' | 'stopped' | 'failed' | 'deleted' | 'deleting';
+
 export interface Sandbox {
   id: string;
   name: string;
-  status: 'pending' | 'running' | 'stopped' | 'failed';
+  status: SandboxStatus;
   image: string;
   host: string;
   port: number;
   user: string;
   token?: string;
+  createdAt?: string;
 }
 
 export interface Volume {

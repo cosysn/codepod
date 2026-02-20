@@ -36,7 +36,7 @@ export class WorkspaceManager {
       name: `devpod-${name}`,
       size: '10Gi'
     });
-    console.log(`Volume created: ${volume.id}`);
+    console.log(`Volume created: ${volume.volumeId}`);
     console.log('');
 
     // Step 2: Create builder sandbox
@@ -46,7 +46,7 @@ export class WorkspaceManager {
       image: this.builderImage,
       cpu: options.builderCpu || 2,
       memory: options.builderMemory || '4Gi',
-      volumes: [{ volumeId: volume.id, mountPath: '/workspace' }]
+      volumes: [{ volumeId: volume.volumeId, mountPath: '/workspace' }]
     });
     console.log(`Builder sandbox created: ${builder.id}`);
     console.log('');
@@ -57,7 +57,7 @@ export class WorkspaceManager {
       id: `${Date.now()}`,
       createdAt: new Date().toISOString(),
       status: 'building',
-      volumeId: volume.id,
+      volumeId: volume.volumeId,
       builderSandboxId: builder.id,
       gitUrl: repoUrl,
       imageRef: `${this.registry}/devpod/${name}:latest`
@@ -67,7 +67,7 @@ export class WorkspaceManager {
     try {
       // Step 3: Build image
       console.log('Building image...');
-      await this.buildImage(builder, volume.id, options);
+      await this.buildImage(builder, volume.volumeId, options);
       console.log('Image built successfully!');
       console.log('');
 
@@ -84,7 +84,7 @@ export class WorkspaceManager {
         image: `${this.registry}/devpod/${name}:latest`,
         cpu: options.devCpu || 2,
         memory: options.devMemory || '4Gi',
-        volumes: [{ volumeId: volume.id, mountPath: '/workspace' }]
+        volumes: [{ volumeId: volume.volumeId, mountPath: '/workspace' }]
       });
       console.log(`Dev sandbox created: ${dev.id}`);
       console.log('');
@@ -104,7 +104,7 @@ export class WorkspaceManager {
       console.error('Build failed:', error);
       try {
         await this.client.deleteSandbox(builder.id);
-        await this.client.deleteVolume(volume.id);
+        await this.client.deleteVolume(volume.volumeId);
       } catch (e) {
         // Ignore cleanup errors
       }

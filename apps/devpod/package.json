@@ -12,6 +12,7 @@
     "dev": "ts-node src/index.ts"
   },
   "dependencies": {
+    "@codepod/sdk-ts": "file:../../libs/sdk-ts",
     "axios": "^1.6.0",
     "commander": "^11.1.0",
     "inquirer": "^9.2.0",
