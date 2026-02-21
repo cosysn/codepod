@@ -22,7 +22,7 @@ let grpcServer: GrpcServer;
 const app = express();
 
 // Raw body for registry blob uploads
-app.use('/registry/v2', express.raw({ type: '*/*', limit: '10gb' }));
+app.use('/v2', express.raw({ type: '*/*', limit: '10gb' }));
 
 // JSON parsing for API routes
 app.use(express.json());
@@ -39,8 +39,36 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// Mount registry routes at /registry/v2
-app.use('/registry/v2', v2Router);
+// Registry path encoding middleware - handle image names with slashes
+// This extracts the image name from the URL path and makes it available as req.params.name
+app.use('/v2/*', (req: Request, res: Response, next: NextFunction) => {
+  // req.params[0] contains everything after /v2/
+  // e.g., "codepod/builder/blobs/uploads/xxx" or "codepod/builder/manifests/latest"
+
+  const pathInfo = req.params[0] || '';
+
+  // Parse the path to extract: name, action (blobs/manifests/tags), and remaining
+  // Format: <name>/<action>/<rest>
+  const segments = pathInfo.split('/').filter(Boolean);
+
+  if (segments.length >= 2) {
+    const action = segments[1];
+    if (['blobs', 'manifests', 'tags'].includes(action)) {
+      // The name is everything before the action
+      const name = segments.slice(0, segments.indexOf(action)).join('/');
+      req.params.name = name;
+    } else if (segments.length >= 3 && segments[2] === 'uploads') {
+      // Handle blobs/uploads pattern
+      const name = segments.slice(0, segments.indexOf('blobs')).join('/');
+      req.params.name = name;
+    }
+  }
+
+  next();
+});
+
+// Mount registry routes at /v2 (Docker Registry API standard)
+app.use('/v2', v2Router);
 
 // Test route to debug
 app.get('/test', (req: Request, res: Response) => {

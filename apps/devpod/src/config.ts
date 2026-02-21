@@ -81,16 +81,16 @@ export class ConfigManager {
 
   /**
    * 从 Server endpoint 推导内置 registry 地址
-   * 例如: http://localhost:8080 → localhost:8080/registry/v2
+   * 例如: http://localhost:8080 → localhost:8080/v2
    */
   getRegistryFromEndpoint(endpoint: string): string {
     try {
       const url = new URL(endpoint);
       const host = url.hostname;
       const port = url.port || (url.protocol === 'https:' ? '443' : '80');
-      return `${host}:${port}/registry/v2`;
+      return `${host}:${port}/v2`;
     } catch {
-      return 'localhost:8080/registry/v2';
+      return 'localhost:8080/v2';
     }
   }
 
@@ -108,7 +108,7 @@ export class ConfigManager {
     if (cfg.endpoint) {
       return this.getRegistryFromEndpoint(cfg.endpoint);
     }
-    return 'localhost:8080/registry/v2';
+    return 'localhost:8080/v2';
   }
 }
 

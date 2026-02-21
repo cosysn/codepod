@@ -144,18 +144,31 @@ router.get('/:name/blobs/:digest', async (req: Request, res: Response) => {
   }
 });
 
-// POST /v2/<name>/blobs/uploads/?_projection - Initiate blob upload
-// Note: Express regex ? doesn't work with params, use optional trailing slash via regex
-router.post('/:name/blobs/uploads/?', async (req: Request, res: Response) => {
+// POST /v2/<name>/blobs/uploads - Initiate blob upload
+router.post('/:name/blobs/uploads', async (req: Request, res: Response) => {
   const { name } = req.params;
   const uploadId = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
   res.status(202);
   const baseUrl = `${req.protocol}://${req.get('host')}`;
-  res.set('Location', `${baseUrl}/registry/v2/${name}/blobs/uploads/${uploadId}`);
+  res.set('Location', `${baseUrl}/v2/${name}/blobs/uploads/${uploadId}`);
   res.set('Docker-Upload-UUID', uploadId);
   res.json({
-    uploadUrl: `${baseUrl}/registry/v2/${name}/blobs/uploads/${uploadId}`,
+    uploadUrl: `${baseUrl}/v2/${name}/blobs/uploads/${uploadId}`,
+    digest: '',
+  });
+});
+
+// Also handle trailing slash
+router.post('/:name/blobs/uploads/', async (req: Request, res: Response) => {
+  const { name } = req.params;
+  const uploadId = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  res.status(202);
+  res.set('Location', `${baseUrl}/v2/${name}/blobs/uploads/${uploadId}`);
+  res.set('Docker-Upload-UUID', uploadId);
+  res.json({
+    uploadUrl: `${baseUrl}/v2/${name}/blobs/uploads/${uploadId}`,
     digest: '',
   });
 });
@@ -215,12 +228,52 @@ router.patch('/:name/blobs/uploads/:id', async (req: Request, res: Response) => 
 
   res.status(202);
   const baseUrl = `${req.protocol}://${req.get('host')}`;
-  res.set('Location', `${baseUrl}/registry/v2/${name}/blobs/uploads/${id}`);
+  res.set('Location', `${baseUrl}/v2/${name}/blobs/uploads/${id}`);
   res.set('Docker-Upload-UUID', id);
   res.json({
-    uploadUrl: `${baseUrl}/registry/v2/${name}/blobs/uploads/${id}`,
+    uploadUrl: `${baseUrl}/v2/${name}/blobs/uploads/${id}`,
     digest: '',
   });
+});
+
+// Catch-all route to handle image names with slashes
+// This handles routes like /codepod/builder/... where "codepod/builder" is the name
+router.all('/*', async (req: Request, res: Response) => {
+  // Parse the path to extract name and action
+  const path = req.params[0] || req.path;
+  console.log('Catch-all received:', { path, params: req.params, query: req.query });
+
+  const segments = path.split('/').filter(Boolean);
+  console.log('Segments:', segments);
+
+  if (segments.length < 2) {
+    return res.status(404).json({ errors: [{ code: 'NAME_UNKNOWN', message: 'Invalid path' }] });
+  }
+
+  const action = segments[1];
+
+  // Handle based on action
+  if (action === 'blobs') {
+    // blobs/uploads/<id> - chunk upload
+    if (segments[2] === 'uploads' && req.method === 'PATCH') {
+      const id = segments[3];
+      const name = segments.slice(0, 2).join('/'); // "codepod/builder"
+      const r = getRegistry();
+
+      res.status(202);
+      const baseUrl = `${req.protocol}://${req.get('host')}`;
+      res.set('Location', `${baseUrl}/v2/${name}/blobs/uploads/${id}`);
+      res.set('Docker-Upload-UUID', id);
+      res.json({
+        uploadUrl: `${baseUrl}/v2/${name}/blobs/uploads/${id}`,
+        digest: '',
+      });
+      return;
+    }
+  }
+
+  // If we get here, no route matched
+  res.status(404).json({ errors: [{ code: 'NOT_FOUND', message: 'Route not found', path }] });
 });
 
 export { router as v2Router };
