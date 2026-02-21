@@ -151,10 +151,11 @@ router.post('/:name/blobs/uploads/?', async (req: Request, res: Response) => {
   const uploadId = `${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
   res.status(202);
-  res.set('Location', `/registry/v2/${name}/blobs/uploads/${uploadId}`);
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  res.set('Location', `${baseUrl}/registry/v2/${name}/blobs/uploads/${uploadId}`);
   res.set('Docker-Upload-UUID', uploadId);
   res.json({
-    uploadUrl: `/registry/v2/${name}/blobs/uploads/${uploadId}`,
+    uploadUrl: `${baseUrl}/registry/v2/${name}/blobs/uploads/${uploadId}`,
     digest: '',
   });
 });
@@ -213,10 +214,11 @@ router.patch('/:name/blobs/uploads/:id', async (req: Request, res: Response) => 
   const { name, id } = req.params;
 
   res.status(202);
-  res.set('Location', `/registry/v2/${name}/blobs/uploads/${id}`);
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  res.set('Location', `${baseUrl}/registry/v2/${name}/blobs/uploads/${id}`);
   res.set('Docker-Upload-UUID', id);
   res.json({
-    uploadUrl: `/registry/v2/${name}/blobs/uploads/${id}`,
+    uploadUrl: `${baseUrl}/registry/v2/${name}/blobs/uploads/${id}`,
     digest: '',
   });
 });
