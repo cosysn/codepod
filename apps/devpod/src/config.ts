@@ -24,6 +24,7 @@ function isDevPodConfig(obj: unknown): obj is DevPodConfig {
 
 export class ConfigManager {
   private static instance: ConfigManager;
+  private cachedConfig: DevPodConfig | null = null;
 
   private constructor() {
     if (!fs.existsSync(CONFIG_DIR)) {
@@ -39,28 +40,43 @@ export class ConfigManager {
   }
 
   load(): DevPodConfig {
+    if (this.cachedConfig) {
+      return this.cachedConfig;
+    }
     try {
       const data = fs.readFileSync(CONFIG_FILE, 'utf-8');
       const parsed = JSON.parse(data);
       if (isDevPodConfig(parsed)) {
+        this.cachedConfig = parsed;
         return parsed;
       }
       console.warn('Invalid config format, using defaults');
-      return { ...defaultConfig };
+      this.cachedConfig = { ...defaultConfig };
+      return this.cachedConfig;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         console.warn('Failed to load config:', error);
       }
-      return { ...defaultConfig };
+      this.cachedConfig = { ...defaultConfig };
+      return this.cachedConfig;
     }
   }
 
   save(config: DevPodConfig): void {
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+    if (!isDevPodConfig(config)) {
+      console.error('Invalid config format, cannot save');
+      return;
+    }
+    try {
+      fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+      this.cachedConfig = config;
+    } catch (error) {
+      console.error('Failed to save config:', error);
+    }
   }
 
   getEndpoint(): string {
-    return this.load().endpoint;
+    return this.cachedConfig?.endpoint ?? defaultConfig.endpoint;
   }
 
   /**
@@ -82,7 +98,10 @@ export class ConfigManager {
    * 获取 registry 地址，优先使用配置的 registry，否则从 endpoint 推导
    */
   getRegistry(): string {
-    const cfg = this.load();
+    if (!this.cachedConfig) {
+      this.load();
+    }
+    const cfg = this.cachedConfig!;
     if (cfg.registry && cfg.registry !== 'localhost:5000') {
       return cfg.registry;
     }
