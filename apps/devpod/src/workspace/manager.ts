@@ -84,7 +84,7 @@ export class WorkspaceManager {
       volumeId: volume.volumeId,
       builderSandboxId: builder.id,
       gitUrl: repoUrl,
-      imageRef: `${this.registry}/devpod/${name}:latest`
+      imageRef: `${this.registry}/workspace/${name}:latest`
     };
     saveWorkspaceMeta(meta);
 
@@ -111,7 +111,7 @@ export class WorkspaceManager {
         devImage = resolved.fullName;
         console.log(`Using resolved dev image: ${devImage}`);
       } else {
-        devImage = `${this.registry}/devpod/${name}:latest`;
+        devImage = `${this.registry}/workspace/${name}:latest`;
       }
 
       const dev = await createSandboxAndWait({
@@ -127,7 +127,7 @@ export class WorkspaceManager {
 
       // Update metadata
       meta.devSandboxId = dev.id;
-      meta.imageRef = `${this.registry}/devpod/${name}:latest`;
+      meta.imageRef = `${this.registry}/workspace/${name}:latest`;
       meta.status = 'running';
       saveWorkspaceMeta(meta);
 
@@ -169,19 +169,22 @@ export class WorkspaceManager {
       const cloneCmd = `git clone --depth 1 ${options.repoUrl} /workspace/repo`;
       await ssh.exec(cloneCmd);
 
-      // Build image - use 127.0.0.1 for registry inside container (registry runs on host network)
+      // Build image - use host.docker.internal for registry inside container (registry runs on host network)
       const dockerfilePath = options.dockerfilePath || '/workspace/repo/.devcontainer/Dockerfile';
-      const buildRegistry = this.registry.replace('localhost', '127.0.0.1').replace('host.docker.internal', '127.0.0.1');
-      const buildCmd = `cd /workspace && docker build -f ${dockerfilePath} -t ${buildRegistry}/devpod/${options.name}:latest /workspace/repo`;
+      let buildRegistry = this.registry;
+      if (buildRegistry.includes('localhost') || buildRegistry.match(/^[\d.]+:/)) {
+        buildRegistry = buildRegistry.replace('localhost', 'host.docker.internal');
+      }
+      const buildCmd = `cd /workspace && docker build -f ${dockerfilePath} -t ${buildRegistry}/workspace/${options.name}:latest /workspace/repo`;
 
       console.log('Building Docker image...');
       await ssh.execStream(buildCmd, (data) => {
         process.stdout.write(data);
       });
 
-      // Push image - use 127.0.0.1 for registry inside container
+      // Push image - use host.docker.internal for registry inside container
       console.log('Pushing image...');
-      const pushCmd = `docker push ${buildRegistry}/devpod/${options.name}:latest`;
+      const pushCmd = `docker push ${buildRegistry}/workspace/${options.name}:latest`;
       await ssh.exec(pushCmd);
 
     } finally {
