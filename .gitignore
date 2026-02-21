@@ -32,3 +32,6 @@ coverage/
 # Misc
 *.tgz
 bin/
+
+docker/data/
+sandbox/server/data/

@@ -99,7 +99,4 @@ ENV CODEPOD_DOCKER_NETWORK=codepod-network
 ENV CODEPOD_MAX_JOBS=10
 ENV CODEPOD_LOG_LEVEL=info
 
-# Mount Docker socket from host
-VOLUME ["/var/run/docker.sock"]
-
 ENTRYPOINT ["/app/wait-for-server.sh"]

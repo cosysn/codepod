@@ -3,8 +3,9 @@
  */
 
 import { createServer } from './server';
+import { logger } from './logger';
 
 const { start } = createServer();
 
-console.log('Starting CodePod Server...');
-start().catch(console.error);
+logger.info('Starting CodePod Server...');
+start().catch((err) => logger.error('Failed to start server: %s', err));

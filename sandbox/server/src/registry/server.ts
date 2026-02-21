@@ -5,6 +5,7 @@
 
 import express from 'express';
 import { imagesRouter, tagsRouter, v2Router } from './routes';
+import { logger } from '../logger';
 
 const PORT = parseInt(process.env.CODEPOD_REGISTRY_PORT || '5000', 10);
 const HOST = process.env.CODEPOD_REGISTRY_HOST || '0.0.0.0';
@@ -41,7 +42,7 @@ app.get('/health', (req, res) => {
 
 // Start server
 const server = app.listen(PORT, HOST, () => {
-  console.log(`Registry server listening on ${HOST}:${PORT}`);
+  logger.info(`Registry server listening on ${HOST}:${PORT}`);
 });
 
 export { app, server };

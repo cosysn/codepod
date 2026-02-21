@@ -6,6 +6,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 CodePod is a secure sandbox platform for isolated development environments and AI Agent execution. It provides Docker-based sandboxes with SSH access, multiple language runtimes (Python, Node.js, Go), and multi-language SDKs.
 
+## Directory Structure
+
+The project has two parallel directories:
+- **`sandbox/`** (primary): Current source code used by the Makefile and build system
+- **`apps/`** (legacy): Older or alternative structure, not actively built
+
+Key directories:
+```
+codepod/
+├── sandbox/           # Primary source (used by Makefile)
+│   ├── agent/         # Agent (Go) - SSH server in containers
+│   ├── runner/        # Runner (Go) - Docker operations
+│   ├── server/        # Server (TypeScript/Node.js)
+│   └── cli/          # CLI (TypeScript/Node.js)
+├── libs/             # SDKs
+│   ├── sdk-go/       # Go SDK
+│   └── sdk-ts/       # TypeScript SDK
+└── apps/             # Legacy/alternative (not built by default)
+```
+
 ## Development Commands
 
 ```bash
@@ -27,7 +47,8 @@ make build-sdk
 # Development mode (run source directly)
 make dev-server      # cd sandbox/server && npm run dev
 make dev-cli        # cd sandbox/cli && npm run dev
-# Go components: cd sandbox/{agent,runner} && go run ./cmd
+make dev-runner     # cd sandbox/runner && go run ./cmd
+make dev-agent      # cd sandbox/agent && go run ./cmd
 
 # Run all tests
 make test
@@ -47,6 +68,14 @@ cd sandbox/cli && npm test
 
 # Docker development (Server runs on port 8080, gRPC on 50051)
 cd docker && docker-compose up -d
+
+# Docker management
+make docker-logs       # View container logs
+make docker-restart   # Restart all services
+make docker-status    # Check service health
+
+# Clean build artifacts
+make clean
 
 # Check build status
 make status
@@ -83,7 +112,7 @@ This project uses `go.work` to manage multi-module dependencies:
 ┌─────────────────────────────────────────────────────────────────┐
 │ Control Plane (CLI/SDK ──HTTP──► Server)                       │
 │   - CLI: TypeScript (commander.js + inquirer.js)               │
-│   - SDK: Go, Python, TypeScript                                │
+│   - SDK: Go, TypeScript                                       │
 │   - Server: Express.js + gRPC Server (port 50051)              │
 └─────────────────────────────────────────────────────────────────┘
                               │

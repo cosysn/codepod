@@ -4,6 +4,9 @@
 
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer as httpCreateServer, IncomingMessage, ServerResponse } from 'http';
+import { createServer as httpsCreateServer } from 'https';
+import * as fs from 'fs';
+import * as path from 'path';
 import { sandboxService } from './services/sandbox';
 import { volumeService } from './services/volume';
 import { createJob, getPendingJobs, assignJob, completeJob, getAllJobs } from './services/job';
@@ -12,6 +15,8 @@ import { Sandbox, CreateSandboxRequest, ErrorResponse, SandboxStatus } from './t
 import { GrpcServer } from './grpc/server';
 import { sshCAService } from './services/ssh-ca';
 import { v2Router } from './registry/routes/v2';
+import { createRegistryMiddleware } from './registry/proxy';
+import { logger } from './logger';
 
 const PORT = parseInt(process.env.PORT || '8080', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -21,8 +26,18 @@ let grpcServer: GrpcServer;
 // Create Express app
 const app = express();
 
-// Raw body for registry blob uploads
-app.use('/v2', express.raw({ type: '*/*', limit: '10gb' }));
+// Check if using external registry proxy
+const useExternalRegistry = !!process.env.CODEPOD_REGISTRY_URL;
+
+// Raw body for registry blob uploads (must come before JSON parsing)
+// Only use for built-in registry, external proxy handles it differently
+if (!useExternalRegistry) {
+  app.use('/v2', (req: Request, res: Response, next: NextFunction) => {
+    logger.info(`${req.method} ${req.originalUrl}`);
+    next();
+  });
+  app.use('/v2', express.raw({ type: '*/*', limit: '10gb' }));
+}
 
 // JSON parsing for API routes
 app.use(express.json());
@@ -39,36 +54,18 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   next();
 });
 
-// Registry path encoding middleware - handle image names with slashes
-// This extracts the image name from the URL path and makes it available as req.params.name
-app.use('/v2/*', (req: Request, res: Response, next: NextFunction) => {
-  // req.params[0] contains everything after /v2/
-  // e.g., "codepod/builder/blobs/uploads/xxx" or "codepod/builder/manifests/latest"
-
-  const pathInfo = req.params[0] || '';
-
-  // Parse the path to extract: name, action (blobs/manifests/tags), and remaining
-  // Format: <name>/<action>/<rest>
-  const segments = pathInfo.split('/').filter(Boolean);
-
-  if (segments.length >= 2) {
-    const action = segments[1];
-    if (['blobs', 'manifests', 'tags'].includes(action)) {
-      // The name is everything before the action
-      const name = segments.slice(0, segments.indexOf(action)).join('/');
-      req.params.name = name;
-    } else if (segments.length >= 3 && segments[2] === 'uploads') {
-      // Handle blobs/uploads pattern
-      const name = segments.slice(0, segments.indexOf('blobs')).join('/');
-      req.params.name = name;
-    }
-  }
-
-  next();
-});
-
 // Mount registry routes at /v2 (Docker Registry API standard)
-app.use('/v2', v2Router);
+// Check if we should use external registry proxy
+const registryMiddleware = createRegistryMiddleware();
+if (registryMiddleware) {
+  // Use external registry proxy
+  app.use('/v2', registryMiddleware);
+} else {
+  // Use built-in registry implementation
+  // Note: v2Router handles image names with slashes (e.g., codepod/builder)
+  // by using wildcard routes like /*/blobs/* and parsing the path directly
+  app.use('/v2', v2Router);
+}
 
 // Test route to debug
 app.get('/test', (req: Request, res: Response) => {
@@ -503,7 +500,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
   if (path === '/api/v1/ssh/cert' && method === 'POST') {
     const data = req.body as Record<string, unknown>;
 
-    console.log('Received cert request:', JSON.stringify(data));
+    logger.info('Received cert request: %s', JSON.stringify(data));
 
     const publicKeyPem = data.publicKey as string;
     const sandboxId = data.sandboxId as string;
@@ -569,14 +566,34 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
 // Mount API routes
 app.use('/api', (req: Request, res: Response) => {
   handleAPIRequest(req, res).catch((error) => {
-    console.error('Request error:', error);
+    logger.error('Request error: %s', error);
     sendError(res, 500, 'Internal server error', String(error));
   });
 });
 
 // Create and start server
-export function createServer(): { server: ReturnType<typeof httpCreateServer>; start: () => Promise<void> } {
-  const server = httpCreateServer(app);
+export function createServer(): { httpServer: ReturnType<typeof httpCreateServer> | undefined; httpsServer: ReturnType<typeof httpsCreateServer> | null; start: () => Promise<void> } {
+  // Check for SSL certificates
+  const certPath = process.env.SSL_CERT_PATH || path.join(process.cwd(), 'cert.pem');
+  const keyPath = process.env.SSL_KEY_PATH || path.join(process.cwd(), 'key.pem');
+
+  let httpServer: ReturnType<typeof httpCreateServer> | undefined;
+  let httpsServer: ReturnType<typeof httpsCreateServer> | null = null;
+
+  // Only start HTTPS server if certificates exist
+  if (fs.existsSync(certPath) && fs.existsSync(keyPath)) {
+    const https = require('https');
+    const sslOptions = {
+      cert: fs.readFileSync(certPath),
+      key: fs.readFileSync(keyPath),
+    };
+    httpsServer = httpsCreateServer(sslOptions, app);
+    logger.info('HTTPS enabled');
+  } else {
+    // Fallback to HTTP
+    httpServer = httpCreateServer(app);
+    logger.info('HTTP only (no SSL certificates found)');
+  }
 
   // Cleanup task: check for dead sandboxes every 60 seconds
   function startCleanupTask(): void {
@@ -592,7 +609,7 @@ export function createServer(): { server: ReturnType<typeof httpCreateServer>; s
           const diffMinutes = (now.getTime() - lastHeartbeat.getTime()) / 60000;
 
           if (diffMinutes > 2) {
-            console.log(`Sandbox ${sb.id} has no heartbeat for ${diffMinutes.toFixed(1)} minutes, marking as stopped`);
+            logger.warn(`Sandbox ${sb.id} has no heartbeat for ${diffMinutes.toFixed(1)} minutes, marking as stopped`);
             store.updateSandbox(sb.id, { status: 'stopped' });
           }
         }
@@ -605,7 +622,7 @@ export function createServer(): { server: ReturnType<typeof httpCreateServer>; s
         const diffMinutes = (now.getTime() - createdAt.getTime()) / 60000;
 
         if (diffMinutes > 5) {
-          console.log(`Sandbox ${sb.id} stuck in deleting status for ${diffMinutes.toFixed(1)} minutes, removing from database`);
+          logger.warn(`Sandbox ${sb.id} stuck in deleting status for ${diffMinutes.toFixed(1)} minutes, removing from database`);
           store.deleteSandbox(sb.id);
         }
       }
@@ -615,22 +632,29 @@ export function createServer(): { server: ReturnType<typeof httpCreateServer>; s
   const start = async (): Promise<void> => {
     // Initialize SSH CA
     await sshCAService.initialize();
-    console.log('SSH CA initialized');
+    logger.info('SSH CA initialized');
 
     // Start cleanup task
     startCleanupTask();
-    console.log('Cleanup task started');
+    logger.info('Cleanup task started');
 
     // Create and start gRPC server
     grpcServer = new GrpcServer(50051);
-    grpcServer.start().catch(console.error);
+    grpcServer.start().catch((err) => logger.error('gRPC server error: %s', err));
 
-    server.listen(PORT, HOST, () => {
-      console.log(`CodePod Server running at http://${HOST}:${PORT}`);
-    });
+    // Start appropriate server
+    if (httpsServer) {
+      httpsServer.listen(PORT, HOST, () => {
+        logger.info(`CodePod Server running at https://${HOST}:${PORT}`);
+      });
+    } else if (httpServer !== undefined) {
+      httpServer.listen(PORT, HOST, () => {
+        logger.info(`CodePod Server running at http://${HOST}:${PORT}`);
+      });
+    }
   };
 
-  return { server, start };
+  return { httpServer, httpsServer, start };
 }
 
 // Start server if run directly

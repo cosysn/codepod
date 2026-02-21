@@ -3,6 +3,7 @@
  */
 
 import { ExternalRegistry, ExternalRegistryType, AuthType } from '../types/registry';
+import { logger } from '../../logger';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -49,7 +50,7 @@ export class ExternalRegistryService {
       };
       fs.writeFileSync(STORAGE_FILE, JSON.stringify(config, null, 2));
     } catch (error) {
-      console.error('Failed to save external registry configs:', error);
+      logger.error('Failed to save external registry configs: %s', error);
     }
   }
 
@@ -199,7 +200,7 @@ export class ExternalRegistryService {
    */
   async pullToLocal(registryId: string, image: string, tag: string): Promise<void> {
     // TODO: Implement using go-containerregistry or direct HTTP
-    console.log(`Pulling ${image}:${tag} from registry ${registryId} to local cache`);
+    logger.info(`Pulling ${image}:${tag} from registry ${registryId} to local cache`);
   }
 
   /**
@@ -207,7 +208,7 @@ export class ExternalRegistryService {
    */
   async pushToExternal(registryId: string, image: string, tag: string): Promise<void> {
     // TODO: Implement
-    console.log(`Pushing ${image}:${tag} to external registry ${registryId}`);
+    logger.info(`Pushing ${image}:${tag} to external registry ${registryId}`);
   }
 
   /**

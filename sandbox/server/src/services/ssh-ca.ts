@@ -11,6 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as sshpk from 'sshpk';
+import { logger } from '../logger';
 
 interface CAKeys {
   publicKey: string;  // CA public key in OpenSSH format
@@ -31,7 +32,7 @@ class SSHCAService {
    * Initialize or load CA keys
    */
   async initialize(): Promise<void> {
-    console.log('[SSH-CA] Initializing with Ed25519 keys...');
+    logger.info('[SSH-CA] Initializing with Ed25519 keys...');
 
     // Try to load existing CA keys
     if (fs.existsSync(this.caKeyPath) && fs.existsSync(this.caKeysPath)) {
@@ -48,10 +49,10 @@ class SSHCAService {
           privateKey: privateKey as sshpk.PrivateKey,
         };
 
-        console.log('[SSH-CA] Loaded existing SSH CA keys (Ed25519)');
+        logger.info('[SSH-CA] Loaded existing SSH CA keys (Ed25519)');
         return;
       } catch (e: any) {
-        console.warn('[SSH-CA] Failed to load existing CA keys:', e.message);
+        logger.warn('[SSH-CA] Failed to load existing CA keys: %s', e.message);
       }
     }
 
@@ -63,7 +64,7 @@ class SSHCAService {
    * Generate new Ed25519 CA key pair using sshpk
    */
   private async generateCAKeys(): Promise<void> {
-    console.log('[SSH-CA] Generating new Ed25519 CA keys...');
+    logger.info('[SSH-CA] Generating new Ed25519 CA keys...');
 
     try {
       // Generate Ed25519 key pair using sshpk
@@ -79,9 +80,9 @@ class SSHCAService {
         privateKey: privateKey,
       };
 
-      console.log('[SSH-CA] Generated new Ed25519 CA keys');
+      logger.info('[SSH-CA] Generated new Ed25519 CA keys');
     } catch (e: any) {
-      console.error('[SSH-CA] Failed to generate CA keys:', e.message);
+      logger.error('[SSH-CA] Failed to generate CA keys: %s', e.message);
       throw new Error(`Failed to generate CA keys: ${e.message}`);
     }
   }
@@ -105,7 +106,7 @@ class SSHCAService {
     username: string = 'root',
     validitySeconds: number = 3600
   ): Promise<string> {
-    console.log('[SSH-CA] Signing public key for sandbox:', sandboxId);
+    logger.info('[SSH-CA] Signing public key for sandbox: %s', sandboxId);
 
     if (!this.caKeys) {
       throw new Error('SSH CA not initialized');
@@ -136,7 +137,7 @@ class SSHCAService {
         }
       }
 
-      console.log('[SSH-CA] User public key type:', userPublicKey.type);
+      logger.debug('[SSH-CA] User public key type: %s', userPublicKey.type);
 
       // Create certificate
       const now = new Date();
@@ -167,11 +168,11 @@ class SSHCAService {
 
       // Return certificate in OpenSSH format
       const certStr = certificate.toString('openssh');
-      console.log('[SSH-CA] Certificate signed successfully');
+      logger.info('[SSH-CA] Certificate signed successfully');
 
       return certStr;
     } catch (e: any) {
-      console.error('[SSH-CA] Failed to sign certificate:', e.message);
+      logger.error('[SSH-CA] Failed to sign certificate: %s', e.message);
       throw new Error(`Failed to sign certificate: ${e.message}`);
     }
   }

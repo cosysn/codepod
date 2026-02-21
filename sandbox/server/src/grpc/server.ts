@@ -1,4 +1,5 @@
 import * as grpc from '@grpc/grpc-js';
+import { logger } from '../logger';
 
 export interface RunnerInfo {
   id: string;
@@ -28,7 +29,7 @@ export class GrpcServer {
             reject(err);
             return;
           }
-          console.log(`gRPC Server listening on ${port}`);
+          logger.info(`gRPC Server listening on ${port}`);
           resolve();
         }
       );

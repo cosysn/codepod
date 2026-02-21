@@ -1,6 +1,27 @@
 version: '3.8'
 
 services:
+  # Official Docker Distribution (Registry V2)
+  registry:
+    image: registry:2
+    container_name: codepod-registry
+    ports:
+      - "5000:5000"
+    environment:
+      - REGISTRY_STORAGE_DELETE_ENABLED=true
+      - REGISTRY_LOG_LEVEL=info
+    volumes:
+      - registry-data:/var/lib/registry
+      - registry-logs:/var/log/registry
+    networks:
+      - codepod-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5000/v2/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   server:
     build:
       context: ../sandbox/server
@@ -10,12 +31,19 @@ services:
     container_name: codepod-server
     ports:
       - "8080:8080"
+      - "8443:8443"
     environment:
       - NODE_ENV=production
       - PORT=8080
       - HOST=0.0.0.0
+      - SSL_CERT_PATH=/certs/cert.pem
+      - SSL_KEY_PATH=/certs/key.pem
+      # 内置镜像仓库地址
+      - CODEPOD_REGISTRY_URL=http://registry:5000
     networks:
       - codepod-network
+    depends_on:
+      - registry
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health"]
       interval: 30s
@@ -25,6 +53,8 @@ services:
     restart: unless-stopped
     volumes:
       - ./data:/app/data
+      - codepod-logs:/var/log/codepod
+      - codepod-certs:/certs
 
   runner:
     build:
@@ -36,14 +66,16 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      - CODEPOD_SERVER_URL=http://server:8080
+      # Use localhost since runner uses host network mode
+      - CODEPOD_SERVER_URL=http://localhost:8080
       - CODEPOD_DOCKER_HOST=unix:///var/run/docker.sock
-      - CODEPOD_DOCKER_NETWORK=codepod-network
+      # Use host network so sandbox can access host resources (Docker, Registry)
+      - CODEPOD_DOCKER_NETWORK=host
       - CODEPOD_MAX_JOBS=10
       - CODEPOD_LOG_LEVEL=info
       - CODEPOD_SANDBOX_IMAGE=codepod/agent:latest
-    networks:
-      - codepod-network
+    # Use host network mode for runner and its sandboxes
+    network_mode: host
     depends_on:
       - server
     restart: unless-stopped
@@ -52,3 +84,9 @@ networks:
   codepod-network:
     name: codepod-network
     driver: bridge
+
+volumes:
+  codepod-logs:
+  codepod-certs:
+  registry-data:
+  registry-logs:

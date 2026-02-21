@@ -1,7 +1,7 @@
 {
   "registries": [
     {
-      "id": "custom-1771636152143",
+      "id": "custom-1771655720082",
       "name": "Test",
       "type": "custom",
       "endpoint": "",
@@ -11,7 +11,7 @@
         "password": "FAQVEg=="
       },
       "insecure": false,
-      "createdAt": "2026-02-21T01:09:12.143Z"
+      "createdAt": "2026-02-21T06:35:20.082Z"
     }
   ]
 }

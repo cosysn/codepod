@@ -177,19 +177,37 @@ export class WorkspaceManager {
       const containerRegistryHost = containerRegistry.split('/')[0];
       const insecureFlag = ` --insecure-registry ${containerRegistryHost}`;
 
-      // Use container registry for build, but also tag with host registry for push
+      // Use container registry for both build and push (host.docker.internal:5000 for container)
       const imageName = `workspace/${options.name}:latest`;
-      const buildCmd = `cd /workspace && docker build -f ${dockerfilePath} -t ${containerRegistry}/${imageName} -t ${this.registry}/${imageName} /workspace/repo`;
+      const fullImageName = `${containerRegistry}/${imageName}`;
+      const buildCmd = `cd /workspace && docker build -f ${dockerfilePath} -t ${fullImageName} /workspace/repo`;
 
       console.log('Building Docker image...');
-      await ssh.execStream(buildCmd, (data) => {
-        process.stdout.write(data);
-      });
+      console.log('Build command:', buildCmd);
+      const buildResult = await ssh.exec(buildCmd);
+      console.log('Build stdout:', buildResult.stdout);
+      console.log('Build stderr:', buildResult.stderr);
+      console.log('Build exit code:', buildResult.exitCode);
 
-      // Push image to host-accessible registry (localhost:5000) so runner can pull it
+      if (buildResult.exitCode !== 0) {
+        throw new Error(`Docker build failed: ${buildResult.stderr}`);
+      }
+
+      // Push image to container registry (host.docker.internal:5000)
+      // The runner can pull from localhost:5000 because Docker routes internally
       console.log('Pushing image...');
-      const pushCmd = `docker${insecureFlag} push ${this.registry}/${imageName}`;
-      await ssh.exec(pushCmd);
+      const pushCmd = `docker${insecureFlag} push ${fullImageName}`;
+      console.log('Push command:', pushCmd);
+      const pushResult = await ssh.exec(pushCmd);
+      console.log('Push stdout:', pushResult.stdout);
+      console.log('Push stderr:', pushResult.stderr);
+      console.log('Push exit code:', pushResult.exitCode);
+
+      if (pushResult.exitCode !== 0) {
+        throw new Error(`Docker push failed: ${pushResult.stderr}`);
+      }
+
+      console.log('Image built successfully!');
 
     } finally {
       ssh.disconnect();
@@ -198,32 +216,20 @@ export class WorkspaceManager {
 
   /**
    * Resolve registry address for container networking
-   * Replaces localhost and private IP addresses with host.docker.internal
+   * Since builder uses host network mode, we use localhost directly
+   * (host.docker.internal doesn't work with host network mode)
    * Note: Strips /v2 suffix as it's the API path, not part of the image name
    */
   private resolveRegistryForContainer(registry: string): string {
-    // Skip if already using host.docker.internal
-    if (registry.includes('host.docker.internal')) {
-      return registry;
-    }
-
+    // For host network mode, use localhost directly
+    // (host.docker.internal doesn't work with host network mode)
+    // Just remove /v2 suffix
     let result = registry;
 
     // Remove /v2 suffix if present (it's the API path, not part of image name)
     if (result.endsWith('/v2')) {
       result = result.slice(0, -3);
     }
-
-    // Replace localhost
-    if (result.includes('localhost')) {
-      result = result.replace('localhost', 'host.docker.internal');
-    }
-
-    // Replace private IP addresses
-    result = result.replace(/^127\.0\.0\.1:/, 'host.docker.internal:');
-    result = result.replace(/^192\.168\.\d+\.\d+:/, 'host.docker.internal:');
-    result = result.replace(/^10\.\d+\.\d+\.\d+:/, 'host.docker.internal:');
-    result = result.replace(/^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+:/, 'host.docker.internal:');
 
     return result;
   }

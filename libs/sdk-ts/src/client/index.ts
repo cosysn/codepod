@@ -3,6 +3,7 @@
  */
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
+import https from 'https';
 import {
   Sandbox,
   Sandbox as SandboxType,
@@ -38,6 +39,10 @@ export class CodePodClient {
    * Create a new CodePod client
    */
   constructor(options: ClientOptions) {
+    // Check if using HTTPS and configure agent to accept self-signed certs
+    const isHttps = options.baseURL?.startsWith('https://');
+    const httpsAgent = isHttps ? new https.Agent({ rejectUnauthorized: false }) : undefined;
+
     this.client = axios.create({
       baseURL: options.baseURL,
       timeout: options.timeout || 30000,
@@ -45,6 +50,7 @@ export class CodePodClient {
         'Content-Type': 'application/json',
         ...(options.apiKey && { 'X-API-Key': options.apiKey }),
       },
+      httpsAgent,
     });
   }
 

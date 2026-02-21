@@ -5,6 +5,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { logger } from '../../logger';
 
 export class StorageService {
   private root: string;
@@ -40,11 +41,14 @@ export class StorageService {
    * Store a blob and return its digest
    */
   async storeBlob(alg: string, content: Buffer): Promise<string> {
+    logger.debug(`storeBlob called: alg=${alg}, content.length=${content.length}`);
     const hash = crypto.createHash(alg.replace('-', ''));
     hash.update(content);
     const digest = `${alg}:${hash.digest('hex')}`;
+    logger.debug(`digest: ${digest}`);
 
     const digestPath = this.getDigestPath(digest);
+    logger.debug(`path: ${digestPath}`);
     fs.mkdirSync(path.dirname(digestPath), { recursive: true });
     fs.writeFileSync(digestPath, content);
 
@@ -129,7 +133,29 @@ export class StorageService {
     if (!fs.existsSync(reposDir)) {
       return [];
     }
-    return fs.readdirSync(reposDir);
+
+    // Recursively find all repositories (including nested paths like codepod/builder)
+    const repos: string[] = [];
+
+    const scanDir = (dir: string, prefix: string): void => {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isDirectory()) {
+          const fullPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+          // Check if this directory has a tags subdirectory (it's a repository)
+          const tagsDir = path.join(dir, entry.name, 'tags');
+          if (fs.existsSync(tagsDir)) {
+            repos.push(fullPath);
+          } else {
+            // Recurse into subdirectory
+            scanDir(path.join(dir, entry.name), fullPath);
+          }
+        }
+      }
+    };
+
+    scanDir(reposDir, '');
+    return repos;
   }
 
   /**
