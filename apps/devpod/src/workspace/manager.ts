@@ -172,8 +172,11 @@ export class WorkspaceManager {
       // Build image - use host.docker.internal for registry inside container (registry runs on host network)
       const dockerfilePath = options.dockerfilePath || '/workspace/repo/.devcontainer/Dockerfile';
       let buildRegistry = this.registry;
-      if (buildRegistry.includes('localhost') || buildRegistry.match(/^[\d.]+:/)) {
-        buildRegistry = buildRegistry.replace('localhost', 'host.docker.internal');
+      // Replace localhost and IP addresses with host.docker.internal for container networking
+      if (buildRegistry.includes('localhost') || buildRegistry.match(/^127\.0\.0\.1:/)) {
+        buildRegistry = buildRegistry
+          .replace('localhost', 'host.docker.internal')
+          .replace('127.0.0.1', 'host.docker.internal');
       }
       const buildCmd = `cd /workspace && docker build -f ${dockerfilePath} -t ${buildRegistry}/workspace/${options.name}:latest /workspace/repo`;
 
