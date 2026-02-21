@@ -102,13 +102,16 @@ export class ConfigManager {
       this.load();
     }
     const cfg = this.cachedConfig!;
-    if (cfg.registry && cfg.registry !== 'localhost:5000') {
-      return cfg.registry;
+    // Use configured registry if set
+    if (cfg.registry) {
+      // Remove /v2 suffix if present (Docker doesn't use it in image names)
+      return cfg.registry.replace(/\/v2$/, '');
     }
+    // Fallback to endpoint-based derivation
     if (cfg.endpoint) {
       return this.getRegistryFromEndpoint(cfg.endpoint);
     }
-    return 'localhost:8080/v2';
+    return 'localhost:5000';
   }
 }
 

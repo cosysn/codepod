@@ -171,17 +171,24 @@ export class WorkspaceManager {
 
       // Build image - use host.docker.internal for registry inside container (registry runs on host network)
       const dockerfilePath = options.dockerfilePath || '/workspace/repo/.devcontainer/Dockerfile';
-      const buildRegistry = this.resolveRegistryForContainer(this.registry);
-      const buildCmd = `cd /workspace && docker build -f ${dockerfilePath} -t ${buildRegistry}/workspace/${options.name}:latest /workspace/repo`;
+      const containerRegistry = this.resolveRegistryForContainer(this.registry);
+
+      // Extract registry host:port for --insecure-registry flag (needed for self-signed certs)
+      const containerRegistryHost = containerRegistry.split('/')[0];
+      const insecureFlag = ` --insecure-registry ${containerRegistryHost}`;
+
+      // Use container registry for build, but also tag with host registry for push
+      const imageName = `workspace/${options.name}:latest`;
+      const buildCmd = `cd /workspace && docker build -f ${dockerfilePath} -t ${containerRegistry}/${imageName} -t ${this.registry}/${imageName} /workspace/repo`;
 
       console.log('Building Docker image...');
       await ssh.execStream(buildCmd, (data) => {
         process.stdout.write(data);
       });
 
-      // Push image - use host.docker.internal for registry inside container
+      // Push image to host-accessible registry (localhost:5000) so runner can pull it
       console.log('Pushing image...');
-      const pushCmd = `docker push ${buildRegistry}/workspace/${options.name}:latest`;
+      const pushCmd = `docker${insecureFlag} push ${this.registry}/${imageName}`;
       await ssh.exec(pushCmd);
 
     } finally {
@@ -192,6 +199,7 @@ export class WorkspaceManager {
   /**
    * Resolve registry address for container networking
    * Replaces localhost and private IP addresses with host.docker.internal
+   * Note: Strips /v2 suffix as it's the API path, not part of the image name
    */
   private resolveRegistryForContainer(registry: string): string {
     // Skip if already using host.docker.internal
@@ -200,6 +208,11 @@ export class WorkspaceManager {
     }
 
     let result = registry;
+
+    // Remove /v2 suffix if present (it's the API path, not part of image name)
+    if (result.endsWith('/v2')) {
+      result = result.slice(0, -3);
+    }
 
     // Replace localhost
     if (result.includes('localhost')) {

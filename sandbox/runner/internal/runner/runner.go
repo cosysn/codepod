@@ -265,9 +265,10 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 
 	// Build environment variables
 	env := map[string]string{
-		"AGENT_TOKEN":      agentToken,
+		"AGENT_TOKEN":       agentToken,
 		"AGENT_SANDBOX_ID": job.SandboxID,
-		"AGENT_SERVER_URL": r.cfg.Server.URL,
+		"AGENT_SERVER_URL":  r.cfg.Server.URL,
+		"AGENT_SSH_PORT":    "2222", // Use non-privileged port to avoid conflicts
 	}
 
 	// Add CA public key if available (base64 encoded to avoid newline issues in env vars)
@@ -281,16 +282,20 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 	}
 
 	// Prepare create options
+	// Mount Docker socket for builder images (needed for docker build/push)
+	mountDockerSocket := strings.Contains(job.Image, "/builder") || strings.Contains(job.Image, "/workspace/")
+
 	opts := &sandbox.CreateOptions{
-		Name:            job.SandboxID,
-		Image:           job.Image,
-		Env:             env,
-		Memory:          job.Memory,
-		CPU:             job.CPU,
-		NetworkMode:     r.cfg.Docker.Network,
-		AgentBinaryPath: r.cfg.Agent.BinaryPath,
-		AgentToken:     agentToken,
-		AgentServerURL:  r.cfg.Server.URL,
+		Name:             job.SandboxID,
+		Image:            job.Image,
+		Env:              env,
+		Memory:           job.Memory,
+		CPU:              job.CPU,
+		NetworkMode:      r.cfg.Docker.Network,
+		AgentBinaryPath:  r.cfg.Agent.BinaryPath,
+		AgentToken:       agentToken,
+		AgentServerURL:   r.cfg.Server.URL,
+		MountDockerSocket: mountDockerSocket,
 	}
 
 	// Create sandbox

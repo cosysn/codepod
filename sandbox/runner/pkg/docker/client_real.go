@@ -11,6 +11,7 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/client"
 	nat "github.com/docker/go-connections/nat"
 )
@@ -43,6 +44,22 @@ func (r *RealClient) CreateContainer(ctx context.Context, config *ContainerConfi
 
 	hostConfig := &container.HostConfig{
 		NetworkMode: container.NetworkMode(config.NetworkMode),
+	}
+
+	// Add volume mounts if specified
+	if len(config.Volumes) > 0 {
+		log.Printf("DEBUG: Adding %d volume mounts", len(config.Volumes))
+		bindMounts := make([]mount.Mount, 0, len(config.Volumes))
+		for _, v := range config.Volumes {
+			bindMounts = append(bindMounts, mount.Mount{
+				Type:     mount.TypeBind,
+				Source:   v.Source,
+				Target:   v.Target,
+				ReadOnly: v.ReadOnly,
+			})
+		}
+		hostConfig.Mounts = bindMounts
+		log.Printf("DEBUG: Added Mounts to hostConfig: %v", hostConfig.Mounts)
 	}
 
 	// Add extra hosts if specified

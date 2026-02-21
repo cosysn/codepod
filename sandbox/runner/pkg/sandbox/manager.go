@@ -53,16 +53,17 @@ type Config struct {
 
 // CreateOptions holds options for creating a sandbox
 type CreateOptions struct {
-	Image          string
-	Name           string
-	Env            map[string]string
-	Memory         string
-	CPU            int
-	Timeout        time.Duration
-	NetworkMode    string  // "bridge", "host", or network name
-	AgentBinaryPath string  // Path to agent binary on host
-	AgentToken     string  // Token for agent to authenticate
-	AgentServerURL string  // Server URL for agent to connect
+	Image           string
+	Name            string
+	Env             map[string]string
+	Memory          string
+	CPU             int
+	Timeout         time.Duration
+	NetworkMode     string  // "bridge", "host", or network name
+	AgentBinaryPath  string  // Path to agent binary on host
+	AgentToken      string  // Token for agent to authenticate
+	AgentServerURL  string  // Server URL for agent to connect
+	MountDockerSocket bool  // Mount /var/run/docker.sock for Docker-in-Docker
 }
 
 // NewManager creates a new sandbox manager
@@ -103,12 +104,23 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 		Memory:     memory,
 		CPUPeriod:  100000,
 		CPUShares:  int64(opts.CPU * 1024),
-		// Publish SSH port (22) to host
+		// Publish SSH port (2222) to host
 		Ports: []docker.PortBinding{
-			{ContainerPort: 22, HostPort: 0, Protocol: "tcp"},
+			{ContainerPort: 2222, HostPort: 0, Protocol: "tcp"},
 		},
 		// Add host.docker.internal to access host services from inside the container
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
+	}
+
+	// Mount Docker socket if requested (for builder containers)
+	if opts.MountDockerSocket {
+		log.Printf("DEBUG: Mounting Docker socket for container %s", opts.Name)
+		config.Volumes = append(config.Volumes, docker.VolumeMount{
+			Type:     "bind",
+			Source:   "/var/run/docker.sock",
+			Target:   "/var/run/docker.sock",
+			ReadOnly: false,
+		})
 	}
 	// Use provided network mode or default to bridge
 	if opts.NetworkMode == "" || opts.NetworkMode == "bridge" {
@@ -178,18 +190,27 @@ func (m *Manager) Start(ctx context.Context, sb *Sandbox) error {
 	sb.Status = SandboxStatusRunning
 	sb.StartedAt = time.Now()
 
-	// Query Docker for the actual SSH port
-	containerInfo, err := m.docker.ListContainers(ctx, false)
-	if err == nil {
-		for _, c := range containerInfo {
-			if c.ID == sb.ContainerID {
-				for _, p := range c.Ports {
-					if p.ContainerPort == 22 && p.Protocol == "tcp" {
-						sb.Port = p.HostPort
-						break
+	// Determine SSH port based on network mode
+	// Check if using host network mode (sandbox directly uses host network)
+	// CODEPOD_DOCKER_NETWORK=host means sandbox uses host network
+	networkMode := os.Getenv("CODEPOD_DOCKER_NETWORK")
+	if networkMode == "host" {
+		// In host network mode, use the container port directly
+		sb.Port = 2222
+	} else {
+		// Query Docker for the actual SSH port mapping
+		containerInfo, err := m.docker.ListContainers(ctx, false)
+		if err == nil {
+			for _, c := range containerInfo {
+				if c.ID == sb.ContainerID {
+					for _, p := range c.Ports {
+						if p.ContainerPort == 2222 && p.Protocol == "tcp" {
+							sb.Port = p.HostPort
+							break
+						}
 					}
+					break
 				}
-				break
 			}
 		}
 	}
@@ -252,7 +273,7 @@ func (m *Manager) List(ctx context.Context) ([]*Sandbox, error) {
 			// Extract SSH port (22) from port bindings
 			port := 0
 			for _, p := range c.Ports {
-				if p.ContainerPort == 22 && p.Protocol == "tcp" {
+				if p.ContainerPort == 2222 && p.Protocol == "tcp" {
 					port = p.HostPort
 					break
 				}
@@ -285,7 +306,7 @@ func (m *Manager) Get(ctx context.Context, id string) (*Sandbox, error) {
 			// Extract SSH port (22) from port bindings
 			port := 0
 			for _, p := range c.Ports {
-				if p.ContainerPort == 22 && p.Protocol == "tcp" {
+				if p.ContainerPort == 2222 && p.Protocol == "tcp" {
 					port = p.HostPort
 					break
 				}
@@ -322,7 +343,7 @@ func (m *Manager) GetByName(ctx context.Context, name string) (*Sandbox, error) 
 				// Extract SSH port (22) from port bindings
 				port := 0
 				for _, p := range c.Ports {
-					if p.ContainerPort == 22 && p.Protocol == "tcp" {
+					if p.ContainerPort == 2222 && p.Protocol == "tcp" {
 						port = p.HostPort
 						break
 					}

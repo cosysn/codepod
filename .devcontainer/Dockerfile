@@ -1,18 +1,31 @@
-FROM codepod/base:latest
+FROM ubuntu:22.04
 
-# 安装开发工具
-RUN apt-get update && apt-get install -y \
+# Install development tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     wget \
     vim \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Go tools
+# Install Go
+RUN curl -fsSL https://go.dev/dl/go1.22.0-linux-amd64.tar.gz -o /tmp/go.tar.gz \
+    && tar -C /usr/local -xzf /tmp/go.tar.gz \
+    && rm /tmp/go.tar.gz
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH="/root/go"
+
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Go tools
 RUN go install golang.org/x/tools/cmd/gopls@latest \
     && go install github.com/codegenie-ai/gotestsum@latest
 
-# 安装 Node.js tools
+# Install Node.js tools
 RUN npm install -g typescript-language-server eslint prettier
 
 WORKDIR /workspace
