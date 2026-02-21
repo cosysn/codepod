@@ -172,11 +172,21 @@ export class WorkspaceManager {
       // Build image - use host.docker.internal for registry inside container (registry runs on host network)
       const dockerfilePath = options.dockerfilePath || '/workspace/repo/.devcontainer/Dockerfile';
       let buildRegistry = this.registry;
-      // Replace localhost and IP addresses with host.docker.internal for container networking
-      if (buildRegistry.includes('localhost') || buildRegistry.match(/^127\.0\.0\.1:/)) {
+      // Replace localhost and private IP addresses with host.docker.internal for container networking
+      // Matches: localhost, 127.0.0.1, 192.168.x.x, 10.x.x.x, 172.16-31.x.x
+      const isLocalAddress = buildRegistry.includes('localhost') ||
+        /^127\.0\.0\.1:/.test(buildRegistry) ||
+        /^192\.168\.\d+\.\d+:/.test(buildRegistry) ||
+        /^10\.\d+\.\d+\.\d+:/.test(buildRegistry) ||
+        /^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+:/.test(buildRegistry);
+
+      if (isLocalAddress) {
         buildRegistry = buildRegistry
           .replace('localhost', 'host.docker.internal')
-          .replace('127.0.0.1', 'host.docker.internal');
+          .replace(/^127\.0\.0\.1:/, 'host.docker.internal:')
+          .replace(/^192\.168\.\d+\.\d+:/, 'host.docker.internal:')
+          .replace(/^10\.\d+\.\d+\.\d+:/, 'host.docker.internal:')
+          .replace(/^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+:/, 'host.docker.internal:');
       }
       const buildCmd = `cd /workspace && docker build -f ${dockerfilePath} -t ${buildRegistry}/workspace/${options.name}:latest /workspace/repo`;
 
