@@ -142,7 +142,7 @@ export class WorkspaceManager {
         await deleteSandbox(builder.id);
         await deleteVolume(volume.volumeId);
       } catch (e) {
-        // Ignore cleanup errors
+        console.error('Cleanup error:', e);
       }
       deleteWorkspaceMeta(name);
       throw error;
@@ -171,23 +171,7 @@ export class WorkspaceManager {
 
       // Build image - use host.docker.internal for registry inside container (registry runs on host network)
       const dockerfilePath = options.dockerfilePath || '/workspace/repo/.devcontainer/Dockerfile';
-      let buildRegistry = this.registry;
-      // Replace localhost and private IP addresses with host.docker.internal for container networking
-      // Matches: localhost, 127.0.0.1, 192.168.x.x, 10.x.x.x, 172.16-31.x.x
-      const isLocalAddress = buildRegistry.includes('localhost') ||
-        /^127\.0\.0\.1:/.test(buildRegistry) ||
-        /^192\.168\.\d+\.\d+:/.test(buildRegistry) ||
-        /^10\.\d+\.\d+\.\d+:/.test(buildRegistry) ||
-        /^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+:/.test(buildRegistry);
-
-      if (isLocalAddress) {
-        buildRegistry = buildRegistry
-          .replace('localhost', 'host.docker.internal')
-          .replace(/^127\.0\.0\.1:/, 'host.docker.internal:')
-          .replace(/^192\.168\.\d+\.\d+:/, 'host.docker.internal:')
-          .replace(/^10\.\d+\.\d+\.\d+:/, 'host.docker.internal:')
-          .replace(/^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+:/, 'host.docker.internal:');
-      }
+      const buildRegistry = this.resolveRegistryForContainer(this.registry);
       const buildCmd = `cd /workspace && docker build -f ${dockerfilePath} -t ${buildRegistry}/workspace/${options.name}:latest /workspace/repo`;
 
       console.log('Building Docker image...');
@@ -203,6 +187,32 @@ export class WorkspaceManager {
     } finally {
       ssh.disconnect();
     }
+  }
+
+  /**
+   * Resolve registry address for container networking
+   * Replaces localhost and private IP addresses with host.docker.internal
+   */
+  private resolveRegistryForContainer(registry: string): string {
+    // Skip if already using host.docker.internal
+    if (registry.includes('host.docker.internal')) {
+      return registry;
+    }
+
+    let result = registry;
+
+    // Replace localhost
+    if (result.includes('localhost')) {
+      result = result.replace('localhost', 'host.docker.internal');
+    }
+
+    // Replace private IP addresses
+    result = result.replace(/^127\.0\.0\.1:/, 'host.docker.internal:');
+    result = result.replace(/^192\.168\.\d+\.\d+:/, 'host.docker.internal:');
+    result = result.replace(/^10\.\d+\.\d+\.\d+:/, 'host.docker.internal:');
+    result = result.replace(/^172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+:/, 'host.docker.internal:');
+
+    return result;
   }
 
   async list(): Promise<void> {
