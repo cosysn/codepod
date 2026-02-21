@@ -31,17 +31,17 @@ jobs:
 
       - name: Build Agent
         run: |
-          cd apps/agent
+          cd sandbox/agent
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o agent ./cmd
 
       - name: Build Runner
         run: |
-          cd apps/runner
+          cd sandbox/runner
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o runner ./cmd
 
       - name: Build Server
         run: |
-          cd apps/server
+          cd sandbox/server
           npm ci
           npm run build
 
@@ -87,7 +87,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           files: |
-            apps/agent/agent
-            apps/runner/runner
+            sandbox/agent/agent
+            sandbox/runner/runner
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -28,21 +28,21 @@ jobs:
 
       - name: Install dependencies
         run: |
-          npm ci --prefix apps/server
+          npm ci --prefix sandbox/server
 
       - name: Run Agent tests
         run: |
-          cd apps/agent
+          cd sandbox/agent
           go test ./... -v
 
       - name: Run Runner tests
         run: |
-          cd apps/runner
+          cd sandbox/runner
           go test ./... -v
 
       - name: Run Server tests
         run: |
-          cd apps/server
+          cd sandbox/server
           npm test
 
   build:
@@ -63,21 +63,21 @@ jobs:
           node-version: '20'
 
       - name: Install npm dependencies
-        run: npm ci --prefix apps/server
+        run: npm ci --prefix sandbox/server
 
       - name: Build Agent
         run: |
-          cd apps/agent
+          cd sandbox/agent
           CGO_ENABLED=0 go build -o agent ./cmd
 
       - name: Build Runner
         run: |
-          cd apps/runner
+          cd sandbox/runner
           CGO_ENABLED=0 go build -o runner ./cmd
 
       - name: Build Server
         run: |
-          cd apps/server
+          cd sandbox/server
           npm run build
 
       - name: Upload artifacts
@@ -85,6 +85,6 @@ jobs:
         with:
           name: binaries
           path: |
-            apps/agent/agent
-            apps/runner/runner
-            apps/server/dist/
+            sandbox/agent/agent
+            sandbox/runner/runner
+            sandbox/server/dist/
