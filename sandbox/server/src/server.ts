@@ -42,6 +42,11 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // Mount registry routes at /registry/v2
 app.use('/registry/v2', v2Router);
 
+// Test route to debug
+app.get('/test', (req: Request, res: Response) => {
+  res.json({ message: 'test route works' });
+});
+
 // Health check (no auth required)
 app.get('/health', (req: Request, res: Response) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
