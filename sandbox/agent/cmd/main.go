@@ -3,9 +3,13 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -13,9 +17,10 @@ import (
 	"github.com/codepod/codepod/sandbox/agent/pkg/config"
 	"github.com/codepod/codepod/sandbox/agent/pkg/reporter"
 	"github.com/codepod/codepod/sandbox/agent/pkg/ssh"
+	sshc "golang.org/x/crypto/ssh"
 )
 
-// generateSSHHostKeys generates SSH host keys if they don't exist
+// generateSSHHostKeys generates SSH host keys using Go crypto library
 func generateSSHHostKeys() error {
 	keyPath := "/etc/ssh/ssh_host_rsa_key"
 	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
@@ -26,11 +31,32 @@ func generateSSHHostKeys() error {
 			return err
 		}
 
-		// Generate RSA key
-		if err := exec.Command("ssh-keygen", "-A").Run(); err != nil {
-			return err
+		// Generate RSA key using Go crypto library (self-contained)
+		privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+		if err != nil {
+			return fmt.Errorf("failed to generate RSA key: %w", err)
 		}
-		log.Println("SSH host keys generated")
+
+		// Write private key
+		privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+		privateKeyPEM := pem.Block{
+			Type:  "RSA PRIVATE KEY",
+			Bytes: privateKeyBytes,
+		}
+		if err := os.WriteFile(keyPath, pem.EncodeToMemory(&privateKeyPEM), 0600); err != nil {
+			return fmt.Errorf("failed to write private key: %w", err)
+		}
+
+		// Also generate public key file for ssh-keygen compatibility
+		sshPublicKey, err := sshc.NewPublicKey(&privateKey.PublicKey)
+		if err != nil {
+			return fmt.Errorf("failed to generate SSH public key: %w", err)
+		}
+		if err := os.WriteFile(keyPath+".pub", sshc.MarshalAuthorizedKey(sshPublicKey), 0644); err != nil {
+			return fmt.Errorf("failed to write public key: %w", err)
+		}
+
+		log.Println("SSH host keys generated using Go crypto library")
 	}
 	return nil
 }

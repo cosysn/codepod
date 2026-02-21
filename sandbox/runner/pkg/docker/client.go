@@ -48,6 +48,7 @@ type ContainerConfig struct {
 	PidsLimit    int64
 	ReadOnlyRoot  bool
 	NetworkMode  string
+	ExtraHosts   []string
 }
 
 // VolumeMount represents a volume mount

@@ -37,6 +37,7 @@ make test-agent
 make test-runner
 make test-server
 make test-cli
+make test-sdk
 
 # Run tests for a single component
 cd sandbox/agent && go test ./...
@@ -49,6 +50,10 @@ cd docker && docker-compose up -d
 
 # Check build status
 make status
+
+# DevPod (VSCode-like IDE)
+make build-devpod          # Build DevPod app
+make devpod-publish-builder # Publish builder Docker image
 ```
 
 ## Go Workspace

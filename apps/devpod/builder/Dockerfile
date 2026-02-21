@@ -3,7 +3,7 @@
 
 FROM ubuntu:22.04
 
-# Install dependencies
+# Install dependencies (no SSH - uses agent's built-in SSH server)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     ca-certificates \
@@ -12,6 +12,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && mkdir -p /var/run/docker \
     && chmod 666 /var/run/docker
+
+# Create directories needed by agent (SSH host keys)
+RUN mkdir -p /etc/ssh && chmod 755 /etc/ssh
 
 # Create workspace directory
 WORKDIR /workspace

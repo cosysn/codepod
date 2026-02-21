@@ -49,6 +49,14 @@ RUN apk add --no-cache \
     openssh-client \
     && rm -rf /var/cache/apk/*
 
+# Configure Docker daemon to allow insecure registries
+RUN mkdir -p /etc/docker && \
+    cat > /etc/docker/daemon.json << 'EOF'
+{
+  "insecure-registries": ["172.18.0.5:5000"]
+}
+EOF
+
 WORKDIR /app
 
 # Copy runner from builder

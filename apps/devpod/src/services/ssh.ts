@@ -139,10 +139,27 @@ export class SSHService {
     host: string,
     port: number,
     username: string,
-    password: string
+    password: string,
+    retries: number = 5,
+    delayMs: number = 3000
   ): Promise<SSHService> {
-    const ssh = new SSHService({ host, port, username, password });
-    await ssh.connect();
-    return ssh;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const ssh = new SSHService({ host, port, username, password });
+        await ssh.connect();
+        return ssh;
+      } catch (error) {
+        lastError = error as Error;
+        console.log(`SSH connection attempt ${attempt}/${retries} failed: ${lastError.message}`);
+        if (attempt < retries) {
+          console.log(`Retrying in ${delayMs}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+
+    throw new Error(`SSH connection failed after ${retries} attempts: ${lastError?.message}`);
   }
 }

@@ -39,8 +39,16 @@ func NewRealClient(dockerHost string) (*RealClient, error) {
 
 // CreateContainer creates a Docker container
 func (r *RealClient) CreateContainer(ctx context.Context, config *ContainerConfig) (string, error) {
+	log.Printf("DEBUG: Creating container with ExtraHosts: %v", config.ExtraHosts)
+
 	hostConfig := &container.HostConfig{
 		NetworkMode: container.NetworkMode(config.NetworkMode),
+	}
+
+	// Add extra hosts if specified
+	if len(config.ExtraHosts) > 0 {
+		hostConfig.ExtraHosts = config.ExtraHosts
+		log.Printf("DEBUG: Added ExtraHosts to hostConfig: %v", hostConfig.ExtraHosts)
 	}
 
 	// Set resource limits if specified
