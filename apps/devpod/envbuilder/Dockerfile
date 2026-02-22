@@ -23,16 +23,14 @@ RUN apk add --no-cache \
     docker \
     curl
 
-# Note: Kaniko should be installed separately or mount from host
-# COPY --from=ghcr.io/kaniko-project/executor:latest /kaniko /kaniko
+# Copy kaniko (using Aliyun mirror for China network)
+COPY --from=registry.cn-hangzhou.aliyuncs.com/kaniko-project/executor:latest /kaniko /kaniko
 
 # Copy envbuilder
 COPY --from=builder /build/envbuilder /usr/local/bin/envbuilder
 
-# Create placeholder for kaniko (will be mounted or installed)
-RUN mkdir -p /kaniko
-
 WORKDIR /workspace
 
+# Default command is envbuilder, but users can override with "sh" for shell access
 ENTRYPOINT ["/usr/local/bin/envbuilder"]
 CMD ["--help"]
