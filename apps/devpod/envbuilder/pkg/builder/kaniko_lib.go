@@ -47,10 +47,13 @@ func (b *KanikoLibBuilder) SetBaseImageCacheDir(cacheDir string) *KanikoLibBuild
 func (b *KanikoLibBuilder) Build(ctx context.Context) error {
 	fmt.Println("Building image with Kaniko library...")
 
-	// 设置 registry mirror 环境变量
+	// 设置 registry mirror 环境变量 - 必须在任何 Kaniko 代码之前设置
+	// 这样 Kaniko 内部的 registry client 可以读取这个环境变量
 	if b.registryMirror != "" {
-		os.Setenv("KANIKO_REGISTRY_MIRROR", b.registryMirror)
-		fmt.Printf("Set KANIKO_REGISTRY_MIRROR=%s\n", b.registryMirror)
+		// 转换逗号为分号 (Kaniko 要求的格式)
+		mirrorStr := strings.ReplaceAll(b.registryMirror, ",", ";")
+		os.Setenv("KANIKO_REGISTRY_MIRROR", mirrorStr)
+		fmt.Printf("Set KANIKO_REGISTRY_MIRROR=%s\n", mirrorStr)
 	}
 
 	// 生成 Kaniko 配置
