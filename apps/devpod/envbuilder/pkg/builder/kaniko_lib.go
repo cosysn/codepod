@@ -79,12 +79,14 @@ func (b *KanikoLibBuilder) Build(ctx context.Context) error {
 }
 
 func (b *KanikoLibBuilder) generateKanikoOptions() *config.KanikoOptions {
-	// Configure registry mirrors - support comma-separated values
+	// Configure registry mirrors - support comma or semicolon-separated values
 	var registryMirrors []string
 
 	if b.registryMirror != "" {
-		// Support comma-separated mirrors
-		mirrors := strings.Split(b.registryMirror, ",")
+		// Support both comma and semicolon separators (Kaniko uses semicolon)
+		// Replace commas with semicolons for consistency
+		mirrorStr := strings.ReplaceAll(b.registryMirror, ",", ";")
+		mirrors := strings.Split(mirrorStr, ";")
 		for _, m := range mirrors {
 			m = strings.TrimSpace(m)
 			if m != "" {
@@ -94,9 +96,9 @@ func (b *KanikoLibBuilder) generateKanikoOptions() *config.KanikoOptions {
 	}
 
 	// Set KANIKO_REGISTRY_MIRROR environment variable (Kaniko checks this)
-	// Format: mirror1,mirror2 or just mirror1
+	// Format: mirror1;mirror2 (semicolon separated)
 	if len(registryMirrors) > 0 {
-		os.Setenv("KANIKO_REGISTRY_MIRROR", strings.Join(registryMirrors, ","))
+		os.Setenv("KANIKO_REGISTRY_MIRROR", strings.Join(registryMirrors, ";"))
 	}
 
 	// Also set cache directory if provided
