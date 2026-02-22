@@ -22,7 +22,7 @@ codepod/
 │   └── cli/          # CLI (TypeScript/Node.js)
 ├── libs/             # SDKs
 │   ├── sdk-go/       # Go SDK
-│   └── sdk-ts/       # TypeScript SDK
+│   ├── sdk-ts/      # TypeScript SDK (REST client + gRPC)
 └── apps/             # Legacy/alternative (not built by default)
 ```
 
@@ -45,10 +45,11 @@ make build-cli
 make build-sdk
 
 # Development mode (run source directly)
-make dev-server      # cd sandbox/server && npm run dev
-make dev-cli        # cd sandbox/cli && npm run dev
-make dev-runner     # cd sandbox/runner && go run ./cmd
-make dev-agent      # cd sandbox/agent && go run ./cmd
+# Note: make dev-* targets are informational - use direct commands below
+cd sandbox/server && npm run dev   # Server on port 8080
+cd sandbox/cli && npm run dev      # CLI
+cd sandbox/runner && go run ./cmd  # Runner
+cd sandbox/agent && go run ./cmd   # Agent
 
 # Run all tests
 make test
@@ -66,7 +67,8 @@ cd sandbox/runner && go test ./...
 cd sandbox/server && npm test
 cd sandbox/cli && npm test
 
-# Docker development (Server runs on port 8080, gRPC on 50051)
+# Docker development
+# Services: Server (8080, 8443), Registry (5000)
 cd docker && docker-compose up -d
 
 # Docker management

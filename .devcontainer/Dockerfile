@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM registry.cn-hangzhou.aliyuncs.com/acs/ubuntu:22.04
 
 # Install development tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
