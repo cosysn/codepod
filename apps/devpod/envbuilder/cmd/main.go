@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/codepod/devpod/envbuilder/pkg/builder"
 	"github.com/codepod/devpod/envbuilder/pkg/config"
@@ -15,10 +17,11 @@ import (
 )
 
 var (
-	workspace       string
-	imageName       string
-	registryURL     string
-	registryMirror  string
+	workspace      string
+	imageName      string
+	registryURL    string
+	registryMirror string
+	baseImage      string
 )
 
 var buildCmd = &cobra.Command{
@@ -44,25 +47,23 @@ func runBuild(cmd *cobra.Command, args []string) {
 
 	log.Printf("Parsed config: image=%s", getStringPtr(cfg.Image))
 
-	// 2. Pre-pull base image if registry mirror is configured (only for kaniko to use local image)
-	if registryMirror != "" && cfg.Image != nil && *cfg.Image != "" {
-		log.Printf("Pre-pulling base image using mirror: %s -> %s", *cfg.Image, registryMirror)
-		if err := builder.PrePullBaseImage(*cfg.Image, registryMirror); err != nil {
-			log.Printf("Warning: Failed to pre-pull base image: %v", err)
-		} else {
-			log.Printf("Base image pulled successfully, kaniko will use local image")
+	// 2. Replace base image if specified
+	if baseImage != "" {
+		log.Printf("Replacing base image with: %s", baseImage)
+		if err := builder.ReplaceBaseImage(workspace, baseImage); err != nil {
+			log.Printf("Warning: Failed to replace base image: %v", err)
 		}
 	}
 
-	// 3. Execute pre-build hooks
-	if registryMirror != "" && cfg.Image != nil && *cfg.Image != "" {
-		log.Printf("Pre-pulling base image with mirror: %s", registryMirror)
-		if err := builder.PrePullBaseImage(*cfg.Image, registryMirror); err != nil {
-			log.Printf("Warning: Failed to pre-pull base image: %v", err)
+	// 3. Rewrite Dockerfile to use mirror registry if configured
+	if registryMirror != "" {
+		log.Printf("Configuring Dockerfile to use registry mirror: %s", registryMirror)
+		if err := builder.RewriteDockerfileForMirror(workspace, registryMirror); err != nil {
+			log.Printf("Warning: Failed to rewrite Dockerfile: %v", err)
 		}
 	}
 
-	// 3. Execute pre-build hooks
+	// 4. Execute pre-build hooks
 	executor := hooks.NewExecutor(workspace)
 	if cfg.OnCreateCommand != nil && len(*cfg.OnCreateCommand) > 0 {
 		if err := executor.ExecuteHook("prebuild", []string(*cfg.OnCreateCommand)); err != nil {
@@ -70,7 +71,7 @@ func runBuild(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// 3. Resolve features
+	// 5. Resolve features
 	featureResolver := features.NewResolver()
 	var featureScripts map[string]string
 	if len(cfg.Features) > 0 {
@@ -82,37 +83,41 @@ func runBuild(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// 4. Configure Docker registry mirror if provided
-	if registryMirror != "" {
-		log.Printf("Configuring registry mirror: %s", registryMirror)
-		if err := builder.ConfigureRegistryMirror(registryMirror); err != nil {
-			log.Printf("Warning: Failed to configure registry mirror: %v", err)
-		}
-	}
-
-	// 5. Create kaniko builder
-	kanikoBuilder := builder.NewKanikoBuilder(workspace, imageName)
-
-	// Check for Dockerfile in config or default location
+	// 6. Determine Dockerfile path (relative to workspace)
 	dockerfilePath := ".devcontainer/Dockerfile"
 	if cfg.DockerFile != nil {
 		dockerfilePath = *cfg.DockerFile
-	} else {
-		// Check if Dockerfile exists at default location
-		defaultDockerfile := fmt.Sprintf("%s/.devcontainer/Dockerfile", workspace)
-		if _, err := os.Stat(defaultDockerfile); err == nil {
-			dockerfilePath = defaultDockerfile
+		// Make it relative if it's absolute
+		if strings.HasPrefix(dockerfilePath, "/") {
+			rel, _ := filepath.Rel(workspace, dockerfilePath)
+			dockerfilePath = rel
 		}
 	}
-	kanikoBuilder.SetDockerfile(dockerfilePath)
-	if featureScripts != nil && len(featureScripts) > 0 {
-		kanikoBuilder.SetFeatureScripts(featureScripts)
+
+	// 7. Build image using Kaniko library (无需 Docker)
+	fmt.Println("Starting build...")
+
+	var buildErr error
+	if builder.UseKanikoLib() {
+		fmt.Println("Using Kaniko library (no Docker required)...")
+		kanikoBuilder := builder.NewKanikoLibBuilder(workspace, imageName)
+		kanikoBuilder.SetDockerfile(dockerfilePath)
+		if baseImage != "" {
+			// 替换基础镜像需要修改 Dockerfile
+			if err := builder.ReplaceBaseImage(workspace, baseImage); err != nil {
+				fmt.Printf("Warning: Failed to replace base image: %v\n", err)
+			}
+		}
+		if registryMirror != "" {
+			kanikoBuilder.SetRegistryMirror(registryMirror)
+		}
+		buildErr = kanikoBuilder.Build(ctx)
+	} else {
+		buildErr = fmt.Errorf("no builder available")
 	}
 
-	// 6. Build image
-	log.Println("Starting build...")
-	if err := kanikoBuilder.Build(ctx); err != nil {
-		log.Fatalf("Build failed: %v", err)
+	if buildErr != nil {
+		log.Fatalf("Build failed: %v", buildErr)
 	}
 
 	// 7. Push to registry
@@ -146,6 +151,7 @@ func init() {
 	buildCmd.Flags().StringVar(&imageName, "image", "", "Target image name")
 	buildCmd.Flags().StringVar(&registryURL, "registry", "localhost:5000", "Registry URL")
 	buildCmd.Flags().StringVar(&registryMirror, "registry-mirror", "", "Docker registry mirror URL (e.g., https://registry.docker-cn.com)")
+	buildCmd.Flags().StringVar(&baseImage, "base-image", "", "Override base image in Dockerfile (e.g., registry.cn-hangzhou.aliyuncs.com/acs/ubuntu:22.04)")
 }
 
 var rootCmd = &cobra.Command{
