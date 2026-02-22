@@ -15,10 +15,11 @@ import (
 )
 
 var (
-	workspace       string
-	imageName       string
-	registryURL     string
-	registryMirror  string
+	workspace            string
+	imageName           string
+	registryURL         string
+	registryMirror      string
+	baseImageCacheDir   string  // NEW
 )
 
 var buildCmd = &cobra.Command{
@@ -90,10 +91,7 @@ func runBuild(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// 5. Create kaniko builder
-	kanikoBuilder := builder.NewKanikoBuilder(workspace, imageName)
-
-	// Check for Dockerfile in config or default location
+	// 5. Check for Dockerfile in config or default location
 	dockerfilePath := ".devcontainer/Dockerfile"
 	if cfg.DockerFile != nil {
 		dockerfilePath = *cfg.DockerFile
@@ -104,13 +102,22 @@ func runBuild(cmd *cobra.Command, args []string) {
 			dockerfilePath = defaultDockerfile
 		}
 	}
+
+	// 6. Build image using Kaniko library (no Docker required)
+	log.Println("Starting build...")
+	log.Println("Using Kaniko library (no Docker socket required)...")
+
+	kanikoBuilder := builder.NewKanikoLibBuilder(workspace, imageName)
 	kanikoBuilder.SetDockerfile(dockerfilePath)
-	if featureScripts != nil && len(featureScripts) > 0 {
-		kanikoBuilder.SetFeatureScripts(featureScripts)
+
+	if registryMirror != "" {
+		kanikoBuilder.SetRegistryMirror(registryMirror)
 	}
 
-	// 6. Build image
-	log.Println("Starting build...")
+	if baseImageCacheDir != "" {
+		kanikoBuilder.SetBaseImageCacheDir(baseImageCacheDir)
+	}
+
 	if err := kanikoBuilder.Build(ctx); err != nil {
 		log.Fatalf("Build failed: %v", err)
 	}
@@ -146,6 +153,7 @@ func init() {
 	buildCmd.Flags().StringVar(&imageName, "image", "", "Target image name")
 	buildCmd.Flags().StringVar(&registryURL, "registry", "localhost:5000", "Registry URL")
 	buildCmd.Flags().StringVar(&registryMirror, "registry-mirror", "", "Docker registry mirror URL (e.g., https://registry.docker-cn.com)")
+	buildCmd.Flags().StringVar(&baseImageCacheDir, "base-image-cache-dir", "", "Path to directory containing cached base images")
 }
 
 var rootCmd = &cobra.Command{
