@@ -69,7 +69,8 @@ func TestConfigValidation(t *testing.T) {
 			SandboxID: "sbox-123",
 			ServerURL: "http://localhost:8080",
 		},
-		SSH: SSHConfig{Port: 22},
+		SSH:  SSHConfig{Port: 22},
+		GRPC: GRPCConfig{Port: 50052},
 	}
 	if err := validCfg.Validate(); err != nil {
 		t.Errorf("expected valid config, got error: %v", err)
@@ -82,7 +83,8 @@ func TestConfigValidation(t *testing.T) {
 			SandboxID: "sbox-123",
 			ServerURL: "http://localhost:8080",
 		},
-		SSH: SSHConfig{Port: 0},
+		SSH:  SSHConfig{Port: 0},
+		GRPC: GRPCConfig{Port: 50052},
 	}
 	if err := invalidPortCfg.Validate(); err == nil {
 		t.Error("expected error for invalid port")
@@ -95,7 +97,8 @@ func TestConfigValidation(t *testing.T) {
 			SandboxID: "",
 			ServerURL: "http://localhost:8080",
 		},
-		SSH: SSHConfig{Port: 22},
+		SSH:  SSHConfig{Port: 22},
+		GRPC: GRPCConfig{Port: 50052},
 	}
 	if err := missingIDCfg.Validate(); err == nil {
 		t.Error("expected error for missing sandbox ID")
@@ -108,7 +111,8 @@ func TestConfigValidation(t *testing.T) {
 			SandboxID: "sbox-123",
 			ServerURL: "http://localhost:8080",
 		},
-		SSH: SSHConfig{Port: 22},
+		SSH:  SSHConfig{Port: 22},
+		GRPC: GRPCConfig{Port: 50052},
 	}
 	if err := missingTokenCfg.Validate(); err == nil {
 		t.Error("expected error for missing token")
@@ -121,7 +125,8 @@ func TestConfigValidation(t *testing.T) {
 			SandboxID: "sbox-123",
 			ServerURL: "",
 		},
-		SSH: SSHConfig{Port: 22},
+		SSH:  SSHConfig{Port: 22},
+		GRPC: GRPCConfig{Port: 50052},
 	}
 	if err := missingURLCfg.Validate(); err == nil {
 		t.Error("expected error for missing server URL")
