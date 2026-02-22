@@ -6,11 +6,12 @@ RUN apk add --no-cache git
 WORKDIR /build
 
 COPY go.mod go.sum ./
-RUN go mod download
+# Skip download - using vendor
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o envbuilder ./cmd
+# Build with vendor
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o envbuilder ./cmd
 
 # Runtime stage
 FROM alpine:3.19
@@ -22,11 +23,14 @@ RUN apk add --no-cache \
     docker \
     curl
 
-# Copy kaniko
-COPY --from=gcr.io/kaniko-project/executor:latest /kaniko /kaniko
+# Note: Kaniko should be installed separately or mount from host
+# COPY --from=ghcr.io/kaniko-project/executor:latest /kaniko /kaniko
 
 # Copy envbuilder
 COPY --from=builder /build/envbuilder /usr/local/bin/envbuilder
+
+# Create placeholder for kaniko (will be mounted or installed)
+RUN mkdir -p /kaniko
 
 WORKDIR /workspace
 
