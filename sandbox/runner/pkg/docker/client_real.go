@@ -9,6 +9,7 @@ import (
 	"log"
 	"time"
 
+	dockerimage "github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
@@ -115,7 +116,7 @@ func (r *RealClient) CreateContainer(ctx context.Context, config *ContainerConfi
 
 // StartContainer starts a Docker container
 func (r *RealClient) StartContainer(ctx context.Context, containerID string) error {
-	return r.cli.ContainerStart(ctx, containerID, types.ContainerStartOptions{})
+	return r.cli.ContainerStart(ctx, containerID, container.StartOptions{})
 }
 
 // StopContainer stops a Docker container
@@ -127,14 +128,14 @@ func (r *RealClient) StopContainer(ctx context.Context, containerID string, time
 
 // RemoveContainer removes a Docker container
 func (r *RealClient) RemoveContainer(ctx context.Context, containerID string, force bool) error {
-	return r.cli.ContainerRemove(ctx, containerID, types.ContainerRemoveOptions{
+	return r.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{
 		Force: force,
 	})
 }
 
 // ListContainers lists all containers
 func (r *RealClient) ListContainers(ctx context.Context, all bool) ([]ContainerInfo, error) {
-	containers, err := r.cli.ContainerList(ctx, types.ContainerListOptions{All: all})
+	containers, err := r.cli.ContainerList(ctx, container.ListOptions{All: all})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
@@ -202,7 +203,7 @@ func (r *RealClient) PullImage(ctx context.Context, image string, auth *AuthConf
 	}
 
 	// Pull the image
-	pullResp, err := r.cli.ImagePull(ctx, image, types.ImagePullOptions{})
+	pullResp, err := r.cli.ImagePull(ctx, image, dockerimage.PullOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to start image pull: %w", err)
 	}
@@ -248,7 +249,7 @@ func (r *RealClient) RemoveNetwork(ctx context.Context, networkID string) error 
 
 // ContainerLogs returns container logs
 func (r *RealClient) ContainerLogs(ctx context.Context, containerID string, follow bool) (io.ReadCloser, error) {
-	logs, err := r.cli.ContainerLogs(ctx, containerID, types.ContainerLogsOptions{
+	logs, err := r.cli.ContainerLogs(ctx, containerID, container.LogsOptions{
 		Follow:     follow,
 		ShowStdout: true,
 		ShowStderr: true,
