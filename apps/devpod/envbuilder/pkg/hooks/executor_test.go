@@ -1,13 +1,14 @@
 package hooks
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestExecutor_New(t *testing.T) {
-	e := NewExecutor("/opt/hooks")
+	e := NewExecutor("/opt/hooks", WithStdout(os.Stdout), WithStderr(os.Stderr))
 	if e.hooksDir != "/opt/hooks" {
 		t.Errorf("expected hooksDir /opt/hooks, got %s", e.hooksDir)
 	}
@@ -21,16 +22,28 @@ func TestExecuteHook(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
+	// Create a marker file that the hook will create to verify execution
+	markerPath := filepath.Join(tmpDir, "marker.txt")
+
 	e := NewExecutor(tmpDir)
-	err = e.ExecuteHook("onCreateCommand", []string{"echo hello"})
+	err = e.ExecuteHook("onCreateCommand", []string{fmt.Sprintf("echo executed > %s", markerPath)})
 	if err != nil {
-		t.Errorf("ExecuteHook failed: %v", err)
+		t.Fatalf("ExecuteHook failed: %v", err)
 	}
 
 	// Verify hook file was created
 	hookPath := filepath.Join(tmpDir, "onCreateCommand")
 	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
-		t.Errorf("hook file was not created at %s", hookPath)
+		t.Fatalf("hook file was not created at %s", hookPath)
+	}
+
+	// Verify hook was actually executed by checking marker file
+	markerContent, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("hook was not executed: marker file not found at %s", markerPath)
+	}
+	if string(markerContent) != "executed\n" {
+		t.Fatalf("unexpected marker content: %q", string(markerContent))
 	}
 }
 
