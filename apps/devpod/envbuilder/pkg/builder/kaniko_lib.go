@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/GoogleContainerTools/kaniko/pkg/config"
 	"github.com/GoogleContainerTools/kaniko/pkg/executor"
@@ -78,16 +79,29 @@ func (b *KanikoLibBuilder) Build(ctx context.Context) error {
 }
 
 func (b *KanikoLibBuilder) generateKanikoOptions() *config.KanikoOptions {
-	// 配置 registry mirrors
+	// Configure registry mirrors - support comma-separated values
 	var registryMirrors []string
+
 	if b.registryMirror != "" {
-		registryMirrors = []string{b.registryMirror}
+		// Support comma-separated mirrors
+		mirrors := strings.Split(b.registryMirror, ",")
+		for _, m := range mirrors {
+			m = strings.TrimSpace(m)
+			if m != "" {
+				registryMirrors = append(registryMirrors, m)
+			}
+		}
 	}
 
-	// 设置 base image cache directory via environment variable
+	// Set KANIKO_REGISTRY_MIRROR environment variable (Kaniko checks this)
+	// Format: mirror1,mirror2 or just mirror1
+	if len(registryMirrors) > 0 {
+		os.Setenv("KANIKO_REGISTRY_MIRROR", strings.Join(registryMirrors, ","))
+	}
+
+	// Also set cache directory if provided
 	if b.baseImageCacheDir != "" {
 		os.Setenv("KANIKO_CACHE_DIR", b.baseImageCacheDir)
-		fmt.Printf("Set KANIKO_CACHE_DIR=%s\n", b.baseImageCacheDir)
 	}
 
 	return &config.KanikoOptions{
@@ -100,7 +114,7 @@ func (b *KanikoLibBuilder) generateKanikoOptions() *config.KanikoOptions {
 		RegistryOptions: config.RegistryOptions{
 			RegistryMirrors: registryMirrors,
 		},
-		SrcContext:     b.context,
-		DockerfilePath: b.dockerfile,
+		SrcContext:      b.context,
+		DockerfilePath:  b.dockerfile,
 	}
 }
