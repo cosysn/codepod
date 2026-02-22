@@ -40,6 +40,7 @@ describe('Docker Registry V2 API', () => {
 
     // Set up Express app
     app = express();
+    app.use(express.raw({ type: '*/*', limit: '10gb' }));
     app.use(express.json());
     app.use('/registry/v2', v2Router);
   });

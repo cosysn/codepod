@@ -21,7 +21,9 @@ function getRegistry(): RegistryService {
 
 // Helper to extract path after /v2
 function extractPath(req: Request): string {
-  let path = req.originalUrl.replace(/^\/v2/, '');
+  // Use req.baseUrl (mount point) + req.path (remaining path)
+  // baseUrl is like '/registry/v2', path is like '/test-image/manifests/latest'
+  let path = req.path;
   if (path.startsWith('/')) path = path.substring(1);
   return path;
 }
