@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	workspace   string
-	imageName   string
-	registryURL string
+	workspace       string
+	imageName       string
+	registryURL     string
+	registryMirror  string
 )
 
 var buildCmd = &cobra.Command{
@@ -43,7 +44,25 @@ func runBuild(cmd *cobra.Command, args []string) {
 
 	log.Printf("Parsed config: image=%s", getStringPtr(cfg.Image))
 
-	// 2. Execute pre-build hooks
+	// 2. Pre-pull base image if registry mirror is configured (only for kaniko to use local image)
+	if registryMirror != "" && cfg.Image != nil && *cfg.Image != "" {
+		log.Printf("Pre-pulling base image using mirror: %s -> %s", *cfg.Image, registryMirror)
+		if err := builder.PrePullBaseImage(*cfg.Image, registryMirror); err != nil {
+			log.Printf("Warning: Failed to pre-pull base image: %v", err)
+		} else {
+			log.Printf("Base image pulled successfully, kaniko will use local image")
+		}
+	}
+
+	// 3. Execute pre-build hooks
+	if registryMirror != "" && cfg.Image != nil && *cfg.Image != "" {
+		log.Printf("Pre-pulling base image with mirror: %s", registryMirror)
+		if err := builder.PrePullBaseImage(*cfg.Image, registryMirror); err != nil {
+			log.Printf("Warning: Failed to pre-pull base image: %v", err)
+		}
+	}
+
+	// 3. Execute pre-build hooks
 	executor := hooks.NewExecutor(workspace)
 	if cfg.OnCreateCommand != nil && len(*cfg.OnCreateCommand) > 0 {
 		if err := executor.ExecuteHook("prebuild", []string(*cfg.OnCreateCommand)); err != nil {
@@ -63,7 +82,15 @@ func runBuild(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// 4. Create kaniko builder
+	// 4. Configure Docker registry mirror if provided
+	if registryMirror != "" {
+		log.Printf("Configuring registry mirror: %s", registryMirror)
+		if err := builder.ConfigureRegistryMirror(registryMirror); err != nil {
+			log.Printf("Warning: Failed to configure registry mirror: %v", err)
+		}
+	}
+
+	// 5. Create kaniko builder
 	kanikoBuilder := builder.NewKanikoBuilder(workspace, imageName)
 
 	// Check for Dockerfile in config or default location
@@ -82,13 +109,13 @@ func runBuild(cmd *cobra.Command, args []string) {
 		kanikoBuilder.SetFeatureScripts(featureScripts)
 	}
 
-	// 5. Build image
+	// 6. Build image
 	log.Println("Starting build...")
 	if err := kanikoBuilder.Build(ctx); err != nil {
 		log.Fatalf("Build failed: %v", err)
 	}
 
-	// 6. Push to registry
+	// 7. Push to registry
 	pusher := registry.NewPusher(registryURL)
 
 	log.Printf("Pushing image to %s...", imageName)
@@ -96,7 +123,7 @@ func runBuild(cmd *cobra.Command, args []string) {
 		log.Fatalf("Push failed: %v", err)
 	}
 
-	// 7. Execute post-build hooks
+	// 8. Execute post-build hooks
 	if cfg.UpdateContentCommand != nil && len(*cfg.UpdateContentCommand) > 0 {
 		if err := executor.ExecuteHook("postbuild", []string(*cfg.UpdateContentCommand)); err != nil {
 			log.Printf("Warning: Post-build hooks failed: %v", err)
@@ -118,6 +145,7 @@ func init() {
 	buildCmd.Flags().StringVar(&workspace, "workspace", "/workspace", "Workspace directory")
 	buildCmd.Flags().StringVar(&imageName, "image", "", "Target image name")
 	buildCmd.Flags().StringVar(&registryURL, "registry", "localhost:5000", "Registry URL")
+	buildCmd.Flags().StringVar(&registryMirror, "registry-mirror", "", "Docker registry mirror URL (e.g., https://registry.docker-cn.com)")
 }
 
 var rootCmd = &cobra.Command{

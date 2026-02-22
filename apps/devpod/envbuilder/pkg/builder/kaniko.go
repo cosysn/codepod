@@ -9,6 +9,72 @@ import (
 	"strings"
 )
 
+// ConfigureRegistryMirror configures Docker to use a registry mirror and pre-pull base images
+func ConfigureRegistryMirror(mirrorURL string) error {
+	// Create Docker config directory
+	dockerConfigDir := "/root/.docker"
+	if err := os.MkdirAll(dockerConfigDir, 0755); err != nil {
+		return fmt.Errorf("failed to create docker config directory: %w", err)
+	}
+
+	// Create daemon.json with registry mirrors
+	daemonConfig := fmt.Sprintf(`{
+	"registry-mirrors": ["%s"]
+}`, mirrorURL)
+
+	daemonConfigPath := dockerConfigDir + "/daemon.json"
+	if err := os.WriteFile(daemonConfigPath, []byte(daemonConfig), 0644); err != nil {
+		return fmt.Errorf("failed to write daemon.json: %w", err)
+	}
+
+	// Restart Docker daemon to apply changes (if running)
+	exec.Command("pkill", "-SIGHUP", "dockerd").Run()
+
+	return nil
+}
+
+// PrePullBaseImage pre-pulls a base image using Docker with the configured mirror
+func PrePullBaseImage(imageName, mirrorURL string) error {
+	// If mirror URL is provided, try to pull from the mirror
+	if mirrorURL != "" {
+		// Construct mirror image URL
+		mirrorImage := convertToMirrorImage(imageName, mirrorURL)
+
+		// Try to pull from mirror
+		cmd := exec.Command("docker", "pull", mirrorImage)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err == nil {
+			// Tag back to original name
+			tagCmd := exec.Command("docker", "tag", mirrorImage, imageName)
+			return tagCmd.Run()
+		}
+		// If mirror pull fails, continue with original image
+	}
+
+	// Pull from original registry
+	cmd := exec.Command("docker", "pull", imageName)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// convertToMirrorImage converts an image name to use a mirror registry
+func convertToMirrorImage(imageName, mirrorURL string) string {
+	// Remove protocol from mirror URL
+	mirrorURL = strings.TrimPrefix(mirrorURL, "https://")
+	mirrorURL = strings.TrimPrefix(mirrorURL, "http://")
+
+	// Extract original registry and image name
+	parts := strings.SplitN(imageName, "/", 2)
+	if len(parts) == 2 && strings.Contains(parts[0], ".") {
+		// Has a registry prefix (e.g., docker.io/library/ubuntu)
+		return mirrorURL + "/" + parts[1]
+	}
+	// No registry prefix (e.g., ubuntu)
+	return mirrorURL + "/library/" + imageName
+}
+
 // Builder defines the interface for container image builders
 type Builder interface {
 	SetDockerfile(dockerfile string) Builder
