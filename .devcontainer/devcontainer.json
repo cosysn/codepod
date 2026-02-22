@@ -1,6 +1,6 @@
 {
   "name": "CodePod Development",
-  "image": "codepod/base:latest",
+  "image": "10.0.0.15:5000/codepod/devcontainer:v10",
   "customizations": {
     "vscode": {
       "extensions": [
