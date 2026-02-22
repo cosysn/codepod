@@ -65,9 +65,19 @@ func runBuild(cmd *cobra.Command, args []string) {
 
 	// 4. Create kaniko builder
 	kanikoBuilder := builder.NewKanikoBuilder(workspace, imageName)
+
+	// Check for Dockerfile in config or default location
+	dockerfilePath := ".devcontainer/Dockerfile"
 	if cfg.DockerFile != nil {
-		kanikoBuilder.SetDockerfile(*cfg.DockerFile)
+		dockerfilePath = *cfg.DockerFile
+	} else {
+		// Check if Dockerfile exists at default location
+		defaultDockerfile := fmt.Sprintf("%s/.devcontainer/Dockerfile", workspace)
+		if _, err := os.Stat(defaultDockerfile); err == nil {
+			dockerfilePath = defaultDockerfile
+		}
 	}
+	kanikoBuilder.SetDockerfile(dockerfilePath)
 	if featureScripts != nil && len(featureScripts) > 0 {
 		kanikoBuilder.SetFeatureScripts(featureScripts)
 	}

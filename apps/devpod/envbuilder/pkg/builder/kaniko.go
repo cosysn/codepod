@@ -75,6 +75,7 @@ func (b *KanikoBuilder) Build(ctx context.Context) error {
 
 	// Build kaniko command
 	cmd := exec.CommandContext(ctx, b.kanikoPath,
+		"--force", // Run outside of container
 		"-c", b.context,
 		"-d", b.image,
 	)
