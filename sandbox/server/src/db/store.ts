@@ -94,6 +94,35 @@ export class Store {
     return sandbox;
   }
 
+  // UpdateAgentAddress updates the agent gRPC address
+  updateAgentAddress(id: string, address: { host?: string; port?: number; token?: string }): Sandbox | undefined {
+    const sandbox = this.sandboxes.get(id);
+    if (!sandbox) return undefined;
+
+    if (!sandbox.agentInfo) {
+      sandbox.agentInfo = {
+        lastHeartbeat: new Date().toISOString(),
+      };
+    }
+
+    if (address.host) {
+      sandbox.agentInfo.addressHost = address.host;
+    }
+    if (address.port) {
+      sandbox.agentInfo.addressPort = address.port;
+    }
+    if (address.token) {
+      sandbox.agentInfo.addressToken = address.token;
+    }
+    // Build combined address string
+    if (sandbox.agentInfo.addressHost && sandbox.agentInfo.addressPort) {
+      sandbox.agentInfo.address = `${sandbox.agentInfo.addressHost}:${sandbox.agentInfo.addressPort}`;
+    }
+
+    this.sandboxes.set(id, sandbox);
+    return sandbox;
+  }
+
   updateSandboxRunnerStatus(
     id: string,
     status: {

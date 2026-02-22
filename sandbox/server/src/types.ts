@@ -13,6 +13,11 @@ export interface AgentInfo {
     memoryMB?: number;
     sessionCount?: number;
   };
+  // Agent gRPC address (from runner)
+  address?: string;
+  addressHost?: string;
+  addressPort?: number;
+  addressToken?: string;
 }
 
 export interface Sandbox {

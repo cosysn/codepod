@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/base64"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 type Config struct {
 	Agent AgentConfig
 	SSH   SSHConfig
+	GRPC  GRPCConfig
 }
 
 // AgentConfig holds Agent connection settings
@@ -30,6 +32,11 @@ type SSHConfig struct {
 	TrustedUserCAKeys string // SSH CA public key for certificate authentication
 }
 
+// GRPCConfig holds gRPC server settings
+type GRPCConfig struct {
+	Port int
+}
+
 func Load() (*Config, error) {
 	return &Config{
 		Agent: AgentConfig{
@@ -42,6 +49,9 @@ func Load() (*Config, error) {
 			HostKeys:    []string{"/etc/ssh/ssh_host_rsa_key"},
 			MaxSessions: 10,
 			IdleTimeout: 1800,
+		},
+		GRPC: GRPCConfig{
+			Port: getEnvIntOrDefault("AGENT_GRPC_PORT", 50052),
 		},
 	}, nil
 }
@@ -56,15 +66,13 @@ func LoadFromEnv() *Config {
 	// Get CA public key from environment (base64 encoded for certificate authentication)
 	trustedUserCAKeysEncoded := os.Getenv("AGENT_TRUSTED_USER_CA_KEYS")
 	var trustedUserCAKeys string
-	fmt.Printf("DEBUG: CA key encoded length: %d\n", len(trustedUserCAKeysEncoded))
 	if trustedUserCAKeysEncoded != "" {
 		// Decode base64-encoded CA key
 		decoded, err := base64.StdEncoding.DecodeString(trustedUserCAKeysEncoded)
 		if err != nil {
-			fmt.Printf("DEBUG: Warning: failed to decode CA key: %v\n", err)
+			log.Printf("Warning: failed to decode CA key: %v", err)
 			trustedUserCAKeys = ""
 		} else {
-			fmt.Printf("DEBUG: CA key decoded, length: %d\n", len(decoded))
 			trustedUserCAKeys = string(decoded)
 		}
 	}
@@ -81,6 +89,9 @@ func LoadFromEnv() *Config {
 			MaxSessions:      getEnvIntOrDefault("AGENT_MAX_SESSIONS", 10),
 			IdleTimeout:      getEnvIntOrDefault("AGENT_IDLE_TIMEOUT", 1800),
 			TrustedUserCAKeys: trustedUserCAKeys,
+		},
+		GRPC: GRPCConfig{
+			Port: getEnvIntOrDefault("AGENT_GRPC_PORT", 50052),
 		},
 	}
 }
@@ -131,6 +142,9 @@ func (c *Config) Validate() error {
 	}
 	if c.SSH.Port <= 0 {
 		return fmt.Errorf("SSH port must be positive")
+	}
+	if c.GRPC.Port <= 0 {
+		return fmt.Errorf("gRPC port must be positive")
 	}
 	return nil
 }

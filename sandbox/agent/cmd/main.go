@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/codepod/codepod/sandbox/agent/pkg/config"
+	"github.com/codepod/codepod/sandbox/agent/pkg/grpc"
 	"github.com/codepod/codepod/sandbox/agent/pkg/reporter"
 	"github.com/codepod/codepod/sandbox/agent/pkg/ssh"
 	sshc "golang.org/x/crypto/ssh"
@@ -108,6 +109,14 @@ func main() {
 		}
 	}()
 
+	// Start gRPC server for command execution in a goroutine
+	// (must start before SSH server since SSH server blocks in Accept())
+	grpcServer := grpc.NewServer(cfg.GRPC.Port, cfg.Agent.Token)
+	if err := grpcServer.Start(ctx); err != nil {
+		log.Fatalf("Failed to start gRPC server: %v", err)
+	}
+
+	// Start SSH server (this blocks forever accepting connections)
 	if err := server.Start(ctx); err != nil {
 		log.Fatalf("Failed to start SSH server: %v", err)
 	}

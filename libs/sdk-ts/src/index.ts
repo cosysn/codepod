@@ -10,7 +10,7 @@ export * from './types';
 export { CodePodClient, ErrorResponse } from './client';
 
 // Sandbox
-export { Sandbox, CommandResult, StreamOutput } from './sandbox';
+export { Sandbox, CommandResult, StreamOutput, CommandOptions, SandboxCreateOptions } from './sandbox';
 
 // Version
 export const VERSION = '0.2.0';

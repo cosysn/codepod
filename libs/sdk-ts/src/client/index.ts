@@ -149,6 +149,17 @@ export class CodePodClient {
   }
 
   /**
+   * Get gRPC connection info for a sandbox
+   * Used to connect directly to the Agent for command execution
+   */
+  async getConnectionInfo(id: string): Promise<{ host: string; port: number; token: string }> {
+    const response = await this.client.get<{ host: string; port: number; token: string }>(
+      `/api/v1/sandboxes/${id}/connection`
+    );
+    return response.data;
+  }
+
+  /**
    * Update sandbox status
    */
   async updateSandboxStatus(

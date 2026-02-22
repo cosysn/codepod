@@ -1,7 +1,7 @@
 # Runner Dockerfile
 
 # Stage 1: Build Runner
-FROM golang:1.21-alpine AS runner-builder
+FROM golang:1.24-alpine AS runner-builder
 
 # Build arguments
 ARG GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
@@ -20,7 +20,7 @@ COPY sandbox/runner/ .
 RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o runner ./cmd
 
 # Stage 2: Build Agent
-FROM golang:1.21-alpine AS agent-builder
+FROM golang:1.24-alpine AS agent-builder
 
 # Build arguments
 ARG GOPROXY=https://mirrors.aliyun.com/goproxy/,direct

@@ -240,6 +240,45 @@ func (c *GrpcClient) UpdateSandboxStatus(ctx context.Context, sandboxID string, 
 	return nil
 }
 
+// AgentAddressUpdate represents an agent address update request
+type AgentAddressUpdate struct {
+	Host  string `json:"host"`
+	Port  int    `json:"port"`
+	Token string `json:"token"`
+}
+
+// UpdateAgentAddress sends the agent address to the server
+func (c *GrpcClient) UpdateAgentAddress(ctx context.Context, sandboxID string, update *AgentAddressUpdate) error {
+	// Build URL - remove trailing slash if present
+	serverURL := strings.TrimRight(c.config.ServerURL, "/")
+	url := fmt.Sprintf("%s/api/v1/sandboxes/%s/agent-address", serverURL, sandboxID)
+
+	data, err := json.Marshal(update)
+	if err != nil {
+		return fmt.Errorf("failed to marshal agent address update: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Runner-Id", c.config.RunnerID)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to send agent address update: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned status %d", resp.StatusCode)
+	}
+
+	return nil
+}
+
 // GetSSHCAPublicKey fetches the SSH CA public key from the server
 func (c *GrpcClient) GetSSHCAPublicKey(ctx context.Context) (string, error) {
 	serverURL := strings.TrimRight(c.config.ServerURL, "/")

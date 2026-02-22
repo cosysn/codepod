@@ -341,6 +341,30 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 		log.Printf("Warning: failed to report running status: %v", err)
 	}
 
+	// Push agent gRPC address to server
+	// Get the token that was stored in env (for agent to authenticate)
+	// Reuse agentToken from above or extract from config
+	agentTokenForAddress := agentToken
+	if sb.Config != nil && sb.Config.Env != nil {
+		for _, e := range sb.Config.Env {
+			if strings.HasPrefix(e, "AGENT_TOKEN=") {
+				agentTokenForAddress = strings.TrimPrefix(e, "AGENT_TOKEN=")
+				break
+			}
+		}
+	}
+	if sb.AgentPort > 0 {
+		if err := r.client.UpdateAgentAddress(ctx, job.SandboxID, &AgentAddressUpdate{
+			Host:  r.getHost(),
+			Port:  sb.AgentPort,
+			Token: agentTokenForAddress,
+		}); err != nil {
+			log.Printf("Warning: failed to report agent address: %v", err)
+		} else {
+			log.Printf("Agent address pushed: %s:%d", r.getHost(), sb.AgentPort)
+		}
+	}
+
 	// Complete the job successfully
 	if err := r.client.CompleteJob(ctx, job.ID, true, "Sandbox created and started"); err != nil {
 		log.Printf("Warning: failed to complete job: %v", err)

@@ -211,6 +211,71 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  // Agent address update endpoint (push agent gRPC address from runner)
+  const agentAddressMatch = path.match(/^\/api\/v1\/sandboxes\/([a-zA-Z0-9-]+)\/agent-address$/);
+  if (agentAddressMatch && method === 'POST') {
+    const sandboxId = agentAddressMatch[1];
+    const runnerId = req.headers['x-runner-id'] as string;
+
+    if (!runnerId) {
+      sendError(res, 400, 'Missing X-Runner-Id header');
+      return;
+    }
+
+    const data = req.body as {
+      host?: string;
+      port?: number;
+      token?: string;
+    };
+
+    if (!data.host || !data.port) {
+      sendError(res, 400, 'Missing host or port');
+      return;
+    }
+
+    const sandbox = store.getSandbox(sandboxId);
+    if (!sandbox) {
+      sendError(res, 404, 'Sandbox not found');
+      return;
+    }
+
+    // Update agent address info
+    store.updateAgentAddress(sandboxId, {
+      host: data.host,
+      port: data.port,
+      token: data.token,
+    });
+
+    // Log the agent address update
+    store.log('UPDATE', 'sandbox', sandboxId, runnerId, {
+      agentHost: data.host,
+      agentPort: data.port,
+    });
+
+    res.status(200).json({ success: true, sandboxId });
+    return;
+  }
+
+  // Connection info endpoint - get Agent's host:port and token
+  const connectionMatch = path.match(/^\/api\/v1\/sandboxes\/([a-zA-Z0-9-]+)\/connection$/);
+  if (connectionMatch && method === 'GET') {
+    const sandboxId = connectionMatch[1];
+
+    const sandbox = store.getSandbox(sandboxId);
+    if (!sandbox) {
+      sendError(res, 404, 'Sandbox not found');
+      return;
+    }
+
+    // Return agent connection info
+    const host = sandbox.agentInfo?.addressHost || sandbox.host;
+    const port = sandbox.agentInfo?.addressPort || sandbox.port;
+    const token = sandbox.agentInfo?.addressToken || sandbox.token;
+
+    res.status(200).json({ host, port, token });
+    return;
+  }
+
   if (path.startsWith('/api/v1/sandboxes/') && method === 'GET') {
     const id = path.split('/').pop();
     if (!id) {
