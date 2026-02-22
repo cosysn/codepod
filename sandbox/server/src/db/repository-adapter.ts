@@ -230,8 +230,14 @@ export class RepositoryAdapter {
 
   // Reset for testing
   reset(): void {
-    // Note: In a real implementation, we would clear the database tables
-    // For now, we just reset the in-memory volumes
+    // Clear all tables in the database
+    const db = getDatabase().getDatabase();
+    db.exec('DELETE FROM sandboxes');
+    db.exec('DELETE FROM jobs');
+    db.exec('DELETE FROM api_keys');
+    db.exec('DELETE FROM audit_logs');
+
+    // Also reset in-memory volumes
     this.volumes.clear();
     this.volumesCounter = 0;
   }

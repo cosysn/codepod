@@ -9,8 +9,12 @@ import * as fs from 'fs';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const pinoRoll = require('pino-roll');
 
-// Ensure log directory exists
-const logDir = '/var/log/codepod';
+// Use environment variable for log directory, or default to /var/log/codepod
+// In test environment (NODE_ENV=test), use a temp directory
+const logDir = process.env.NODE_ENV === 'test'
+  ? process.env.LOG_DIR || '/tmp/codepod-test-logs'
+  : process.env.LOG_DIR || '/var/log/codepod';
+
 if (!fs.existsSync(logDir)) {
   fs.mkdirSync(logDir, { recursive: true });
 }
