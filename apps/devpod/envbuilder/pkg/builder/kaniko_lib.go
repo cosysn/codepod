@@ -104,8 +104,3 @@ func (b *KanikoLibBuilder) generateKanikoOptions() *config.KanikoOptions {
 		DockerfilePath: b.dockerfile,
 	}
 }
-
-// UseKanikoLib 检查是否可以使用 Kaniko 库
-func UseKanikoLib() bool {
-	return true
-}

@@ -19,7 +19,7 @@ var (
 	imageName           string
 	registryURL         string
 	registryMirror      string
-	baseImageCacheDir   string  // NEW
+	baseImageCacheDir   string
 )
 
 var buildCmd = &cobra.Command{
@@ -55,15 +55,7 @@ func runBuild(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// 3. Execute pre-build hooks
-	if registryMirror != "" && cfg.Image != nil && *cfg.Image != "" {
-		log.Printf("Pre-pulling base image with mirror: %s", registryMirror)
-		if err := builder.PrePullBaseImage(*cfg.Image, registryMirror); err != nil {
-			log.Printf("Warning: Failed to pre-pull base image: %v", err)
-		}
-	}
-
-	// 3. Execute pre-build hooks
+	// 4. Execute pre-build hooks
 	executor := hooks.NewExecutor(workspace)
 	if cfg.OnCreateCommand != nil && len(*cfg.OnCreateCommand) > 0 {
 		if err := executor.ExecuteHook("prebuild", []string(*cfg.OnCreateCommand)); err != nil {
@@ -71,7 +63,7 @@ func runBuild(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// 3. Resolve features
+	// 5. Resolve features
 	featureResolver := features.NewResolver()
 	var featureScripts map[string]string
 	if len(cfg.Features) > 0 {
@@ -83,7 +75,7 @@ func runBuild(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// 4. Configure Docker registry mirror if provided
+	// 6. Configure registry
 	if registryMirror != "" {
 		log.Printf("Configuring registry mirror: %s", registryMirror)
 		if err := builder.ConfigureRegistryMirror(registryMirror); err != nil {
@@ -91,7 +83,7 @@ func runBuild(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// 5. Check for Dockerfile in config or default location
+	// 7. Check for Dockerfile
 	dockerfilePath := ".devcontainer/Dockerfile"
 	if cfg.DockerFile != nil {
 		dockerfilePath = *cfg.DockerFile
@@ -103,7 +95,7 @@ func runBuild(cmd *cobra.Command, args []string) {
 		}
 	}
 
-	// 6. Build image using Kaniko library (no Docker required)
+	// 8. Build image using Kaniko library (no Docker required)
 	log.Println("Starting build...")
 	log.Println("Using Kaniko library (no Docker socket required)...")
 
@@ -122,7 +114,7 @@ func runBuild(cmd *cobra.Command, args []string) {
 		log.Fatalf("Build failed: %v", err)
 	}
 
-	// 7. Push to registry
+	// 8. Push to registry
 	pusher := registry.NewPusher(registryURL)
 
 	log.Printf("Pushing image to %s...", imageName)
@@ -130,7 +122,7 @@ func runBuild(cmd *cobra.Command, args []string) {
 		log.Fatalf("Push failed: %v", err)
 	}
 
-	// 8. Execute post-build hooks
+	// 9. Execute post-build hooks
 	if cfg.UpdateContentCommand != nil && len(*cfg.UpdateContentCommand) > 0 {
 		if err := executor.ExecuteHook("postbuild", []string(*cfg.UpdateContentCommand)); err != nil {
 			log.Printf("Warning: Post-build hooks failed: %v", err)
