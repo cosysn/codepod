@@ -10,7 +10,7 @@ import * as path from 'path';
 import { sandboxService } from './services/sandbox';
 import { volumeService } from './services/volume';
 import { createJob, getPendingJobs, assignJob, completeJob, getAllJobs } from './services/job';
-import { store } from './db/store';
+import { repository } from './db/repository-adapter';
 import { Sandbox, CreateSandboxRequest, ErrorResponse, SandboxStatus } from './types';
 import { GrpcServer } from './grpc/server';
 import { sshCAService } from './services/ssh-ca';
@@ -97,7 +97,7 @@ async function authenticate(req: Request): Promise<boolean> {
   const apiKey = req.headers['x-api-key'] as string;
   if (!apiKey) return false;
 
-  return store.validateAPIKey(apiKey) !== undefined;
+  return repository.validateAPIKey(apiKey) !== undefined;
 }
 
 // API routes handler - adapted for Express
@@ -115,7 +115,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
     }
 
     const result = sandboxService.create(body as CreateSandboxRequest);
-    store.log('CREATE', 'sandbox', result.sandbox.id, undefined, { image: result.sandbox.image });
+    repository.log('CREATE', 'sandbox', result.sandbox.id, undefined, { image: result.sandbox.image });
     res.status(201).json(result);
     return;
   }
@@ -137,14 +137,14 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
       sessionCount?: number;
     };
 
-    const sandbox = store.getSandbox(sandboxId);
+    const sandbox = repository.getSandbox(sandboxId);
     if (!sandbox) {
       sendError(res, 404, 'Sandbox not found');
       return;
     }
 
     // Update agent info
-    store.updateAgentInfo(sandboxId, {
+    repository.updateAgentInfo(sandboxId, {
       metrics: {
         cpuPercent: data.cpuPercent,
         memoryMB: data.memoryMB,
@@ -154,7 +154,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
 
     // If status is stopped, update sandbox status
     if (data.status === 'stopped') {
-      store.updateSandbox(sandboxId, { status: 'stopped' });
+      repository.updateSandbox(sandboxId, { status: 'stopped' });
     }
 
     res.status(200).json({ success: true, sandboxId });
@@ -180,7 +180,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
       message?: string;
     };
 
-    const sandbox = store.getSandbox(sandboxId);
+    const sandbox = repository.getSandbox(sandboxId);
     if (!sandbox) {
       sendError(res, 404, 'Sandbox not found');
       return;
@@ -193,7 +193,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
     }
 
     // Update sandbox status
-    store.updateSandboxRunnerStatus(sandboxId, {
+    repository.updateSandboxRunnerStatus(sandboxId, {
       runnerId,
       containerId: data.containerId,
       port: data.port,
@@ -202,7 +202,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
     });
 
     // Log the status change
-    store.log('UPDATE', 'sandbox', sandboxId, runnerId, {
+    repository.log('UPDATE', 'sandbox', sandboxId, runnerId, {
       status: data.status,
       message: data.message,
     });
@@ -233,21 +233,21 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    const sandbox = store.getSandbox(sandboxId);
+    const sandbox = repository.getSandbox(sandboxId);
     if (!sandbox) {
       sendError(res, 404, 'Sandbox not found');
       return;
     }
 
     // Update agent address info
-    store.updateAgentAddress(sandboxId, {
+    repository.updateAgentAddress(sandboxId, {
       host: data.host,
       port: data.port,
       token: data.token,
     });
 
     // Log the agent address update
-    store.log('UPDATE', 'sandbox', sandboxId, runnerId, {
+    repository.log('UPDATE', 'sandbox', sandboxId, runnerId, {
       agentHost: data.host,
       agentPort: data.port,
     });
@@ -261,7 +261,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
   if (connectionMatch && method === 'GET') {
     const sandboxId = connectionMatch[1];
 
-    const sandbox = store.getSandbox(sandboxId);
+    const sandbox = repository.getSandbox(sandboxId);
     if (!sandbox) {
       sendError(res, 404, 'Sandbox not found');
       return;
@@ -347,7 +347,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
   // Stats route
   if (path === '/api/v1/stats' && method === 'GET') {
     const stats = sandboxService.getStats();
-    const storeStats = store.getStats();
+    const storeStats = repository.getStats();
     res.status(200).json({ ...stats, ...storeStats });
     return;
   }
@@ -356,13 +356,13 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
   if (path === '/api/v1/keys' && method === 'POST') {
     const body = req.body;
     const name = (body as Record<string, unknown>)?.name || 'default';
-    const apiKey = store.createAPIKey({ name: String(name) });
+    const apiKey = repository.createAPIKey({ name: String(name) });
     res.status(201).json({ key: apiKey.key, id: apiKey.id });
     return;
   }
 
   if (path === '/api/v1/keys' && method === 'GET') {
-    const keys = store.listAPIKeys();
+    const keys = repository.listAPIKeys();
     res.status(200).json({ keys });
     return;
   }
@@ -373,7 +373,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
       sendError(res, 400, 'Missing key ID');
       return;
     }
-    const deleted = store.deleteAPIKey(id);
+    const deleted = repository.deleteAPIKey(id);
     if (!deleted) {
       sendError(res, 404, 'Key not found');
       return;
@@ -384,7 +384,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
 
   // Audit logs
   if (path === '/api/v1/audit' && method === 'GET') {
-    const logs = store.getAuditLogs({ limit: 100 });
+    const logs = repository.getAuditLogs({ limit: 100 });
     res.status(200).json({ logs });
     return;
   }
@@ -471,7 +471,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
     const message = data.message || (success ? 'Job completed' : 'Job failed');
 
     completeJob(jobId, success);
-    store.log('COMPLETE', 'job', jobId, runnerId, { success, message });
+    repository.log('COMPLETE', 'job', jobId, runnerId, { success, message });
     res.status(200).json({ success, message });
     return;
   }
@@ -498,7 +498,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
 
     try {
       const result = volumeService.create(reqData);
-      store.log('CREATE', 'volume', result.volumeId, undefined, { name: reqData.name, size: reqData.size });
+      repository.log('CREATE', 'volume', result.volumeId, undefined, { name: reqData.name, size: reqData.size });
       res.status(201).json(result);
       return;
     } catch (e) {
@@ -543,7 +543,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    store.log('DELETE', 'volume', id);
+    repository.log('DELETE', 'volume', id);
     res.status(200).json({ success: true });
     return;
   }
@@ -582,7 +582,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
     }
 
     // Verify sandbox exists and user has access
-    const sandbox = store.getSandbox(sandboxId);
+    const sandbox = repository.getSandbox(sandboxId);
     if (!sandbox) {
       sendError(res, 404, 'Sandbox not found');
       return;
@@ -604,7 +604,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
 
   // Cleanup endpoint: remove stuck sandboxes
   if (path === '/api/v1/cleanup' && method === 'POST') {
-    const sandboxes = store.listSandboxes();
+    const sandboxes = repository.listSandboxes();
     const now = new Date();
     let cleaned = 0;
 
@@ -614,7 +614,7 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
         const createdAt = new Date(sb.createdAt);
         const diffMinutes = (now.getTime() - createdAt.getTime()) / 60000;
         if (diffMinutes > 1) {
-          store.deleteSandbox(sb.id);
+          repository.deleteSandbox(sb.id);
           cleaned++;
         }
       }
@@ -663,7 +663,7 @@ export function createServer(): { httpServer: ReturnType<typeof httpCreateServer
   // Cleanup task: check for dead sandboxes every 60 seconds
   function startCleanupTask(): void {
     setInterval(() => {
-      const sandboxes = store.listSandboxes();
+      const sandboxes = repository.listSandboxes();
       const now = new Date();
 
       // Check running sandboxes for stale heartbeat
@@ -675,7 +675,7 @@ export function createServer(): { httpServer: ReturnType<typeof httpCreateServer
 
           if (diffMinutes > 2) {
             logger.warn(`Sandbox ${sb.id} has no heartbeat for ${diffMinutes.toFixed(1)} minutes, marking as stopped`);
-            store.updateSandbox(sb.id, { status: 'stopped' });
+            repository.updateSandbox(sb.id, { status: 'stopped' });
           }
         }
       }
@@ -688,7 +688,7 @@ export function createServer(): { httpServer: ReturnType<typeof httpCreateServer
 
         if (diffMinutes > 5) {
           logger.warn(`Sandbox ${sb.id} stuck in deleting status for ${diffMinutes.toFixed(1)} minutes, removing from database`);
-          store.deleteSandbox(sb.id);
+          repository.deleteSandbox(sb.id);
         }
       }
     }, 60000); // Check every 60 seconds

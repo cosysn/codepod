@@ -3,13 +3,13 @@
  */
 
 import { SandboxService } from './sandbox';
-import { store } from '../db/store';
+import { repository } from '../db/repository-adapter';
 
 describe('SandboxService', () => {
   let service: SandboxService;
 
   beforeEach(() => {
-    store.reset(); // Clear shared state
+    repository.reset(); // Clear shared state
     service = new SandboxService();
   });
 

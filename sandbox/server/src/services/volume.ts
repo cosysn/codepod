@@ -2,7 +2,7 @@
  * Volume service
  */
 
-import { store } from '../db/store';
+import { repository } from '../db/repository-adapter';
 import { CreateVolumeRequest, CreateVolumeResponse } from '../types';
 
 // Simple UUID generator
@@ -27,14 +27,14 @@ export class VolumeService {
     }
 
     // Create volume record
-    const volume = store.createVolume(req);
+    const volume = repository.createVolume(req);
 
     // For local storage, generate a host path
     // In production, this would be provided by the runner
     const hostPath = `/var/lib/docker/volumes/${volume.id}/_data`;
 
     // Update volume with host path
-    store.updateVolumeHostPath(volume.id, hostPath);
+    repository.updateVolumeHostPath(volume.id, hostPath);
 
     return {
       volumeId: volume.id,
@@ -46,15 +46,15 @@ export class VolumeService {
    * Get volume by ID
    */
   get(id: string) {
-    return store.getVolume(id);
+    return repository.getVolume(id);
   }
 
   /**
    * List all volumes
    */
-  list(): { volumes: ReturnType<typeof store.listVolumes> } {
+  list(): { volumes: ReturnType<typeof repository.listVolumes> } {
     return {
-      volumes: store.listVolumes(),
+      volumes: repository.listVolumes(),
     };
   }
 
@@ -62,7 +62,7 @@ export class VolumeService {
    * Delete volume
    */
   delete(id: string): boolean {
-    return store.deleteVolume(id);
+    return repository.deleteVolume(id);
   }
 }
 

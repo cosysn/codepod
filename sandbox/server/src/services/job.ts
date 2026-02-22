@@ -4,7 +4,7 @@
 
 import { getDatabase } from '../db/database';
 import { JobRepository } from '../db/repository';
-import { store } from '../db/store';
+import { repository } from '../db/repository-adapter';
 import { logger } from '../logger';
 
 let jobRepo: JobRepository | null = null;
@@ -120,7 +120,7 @@ export function completeJob(jobId: string, success: boolean): boolean {
   // If delete job completed successfully, also delete the sandbox from database
   if (job && job.type === 'delete' && success) {
     logger.debug(`[completeJob] Deleting sandbox ${job.sandboxId} from database`);
-    const deleted = store.deleteSandbox(job.sandboxId);
+    const deleted = repository.deleteSandbox(job.sandboxId);
     logger.debug(`[completeJob] Sandbox delete result: ${deleted}`);
   }
 

@@ -76,6 +76,10 @@ export class SandboxRepository {
       fields.push('token = ?');
       values.push(updates.token);
     }
+    if (updates.agentInfo !== undefined) {
+      fields.push('agent_info = ?');
+      values.push(JSON.stringify(updates.agentInfo));
+    }
 
     if (fields.length === 0) return sandbox;
 

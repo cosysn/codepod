@@ -3,6 +3,8 @@
  */
 
 import Database, { Database as DatabaseType } from 'better-sqlite3';
+import * as path from 'path';
+import * as fs from 'fs';
 
 export class SqliteDB {
   private db: DatabaseType;
@@ -107,7 +109,23 @@ export function initDatabase(path?: string): SqliteDB {
 
 export function getDatabase(): SqliteDB {
   if (!dbInstance) {
-    dbInstance = new SqliteDB(process.env.CODEPOD_DB_PATH || ':memory:');
+    // Use same default path as initDatabase for consistency
+    const defaultPath = process.env.CODEPOD_DB_PATH || ':memory:';
+    // If CODEPOD_DB_PATH is not set, default to file-based storage
+    const pathToUse = process.env.CODEPOD_DB_PATH
+      ? process.env.CODEPOD_DB_PATH
+      : (process.env.NODE_ENV === 'test' ? ':memory:' : getDefaultDbPath());
+    dbInstance = new SqliteDB(pathToUse);
   }
   return dbInstance;
+}
+
+function getDefaultDbPath(): string {
+  // Use a default file path if not specified
+  const dataDir = path.join(process.cwd(), 'data');
+  // Ensure data directory exists
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+  return path.join(dataDir, 'codepod.db');
 }
