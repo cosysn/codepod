@@ -11,7 +11,16 @@ RUN apk add --no-cache \
     bash \
     docker \
     curl \
-    nano
+    nano \
+    git \
+    wget
+
+# Install Go 1.25 (using Aliyun mirror for China network)
+RUN wget -q https://mirrors.aliyun.com/golang/go1.25.0.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go1.25.0.linux-amd64.tar.gz && \
+    rm go1.25.0.linux-amd64.tar.gz
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH="/root/go"
 
 # Configure Docker registry mirror
 RUN mkdir -p /etc/docker && \
