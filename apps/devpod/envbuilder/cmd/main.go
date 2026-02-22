@@ -29,6 +29,11 @@ var buildCmd = &cobra.Command{
 func runBuild(cmd *cobra.Command, args []string) {
 	ctx := context.Background()
 
+	// Validate required flags
+	if imageName == "" {
+		log.Fatal("Error: --image flag is required")
+	}
+
 	// 1. Parse devcontainer.json
 	devcontainerPath := fmt.Sprintf("%s/.devcontainer/devcontainer.json", workspace)
 	cfg, err := config.ParseDevcontainer(devcontainerPath)
@@ -48,8 +53,9 @@ func runBuild(cmd *cobra.Command, args []string) {
 
 	// 3. Resolve features
 	featureResolver := features.NewResolver()
+	var featureScripts map[string]string
 	if len(cfg.Features) > 0 {
-		featureScripts, err := featureResolver.ResolveAll(ctx, cfg.Features)
+		featureScripts, err = featureResolver.ResolveAll(ctx, cfg.Features)
 		if err != nil {
 			log.Printf("Warning: Failed to resolve features: %v", err)
 		} else {
@@ -61,6 +67,9 @@ func runBuild(cmd *cobra.Command, args []string) {
 	kanikoBuilder := builder.NewKanikoBuilder(workspace, imageName)
 	if cfg.DockerFile != nil {
 		kanikoBuilder.SetDockerfile(*cfg.DockerFile)
+	}
+	if featureScripts != nil && len(featureScripts) > 0 {
+		kanikoBuilder.SetFeatureScripts(featureScripts)
 	}
 
 	// 5. Build image
