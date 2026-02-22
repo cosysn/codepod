@@ -29,15 +29,15 @@ func (s *StringOrStringArray) UnmarshalJSON(data []byte) error {
 
 // DevcontainerConfig holds the parsed devcontainer configuration
 type DevcontainerConfig struct {
-	Image                *string               `json:"image,omitempty"`
-	DockerFile           *string               `json:"dockerFile,omitempty"`
-	Features             map[string]any        `json:"features,omitempty"`
-	OnCreateCommand     *StringOrStringArray  `json:"onCreateCommand,omitempty"`
-	UpdateContentCommand *StringOrStringArray  `json:"updateContentCommand,omitempty"`
-	PostCreateCommand   *StringOrStringArray  `json:"postCreateCommand,omitempty"`
-	PostStartCommand    *StringOrStringArray  `json:"postStartCommand,omitempty"`
-	WorkspaceFolder     *string               `json:"workspaceFolder,omitempty"`
-	Extensions          []string              `json:"extensions,omitempty"`
+	Image                *string              `json:"image,omitempty"`
+	DockerFile           *string              `json:"dockerFile,omitempty"`
+	Features             map[string]any       `json:"features,omitempty"`
+	OnCreateCommand      *StringOrStringArray `json:"onCreateCommand,omitempty"`
+	UpdateContentCommand *StringOrStringArray `json:"updateContentCommand,omitempty"`
+	PostCreateCommand    *StringOrStringArray `json:"postCreateCommand,omitempty"`
+	PostStartCommand     *StringOrStringArray `json:"postStartCommand,omitempty"`
+	WorkspaceFolder      *string              `json:"workspaceFolder,omitempty"`
+	Extensions           []string             `json:"extensions,omitempty"`
 }
 
 // ParseDevcontainer parses a devcontainer.json file and returns the configuration
