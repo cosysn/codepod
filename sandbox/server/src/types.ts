@@ -13,10 +13,8 @@ export interface AgentInfo {
     memoryMB?: number;
     sessionCount?: number;
   };
-  // Agent gRPC address (from runner)
+  // Agent address (from runner) - unified address
   address?: string;
-  addressHost?: string;
-  addressPort?: number;
   addressToken?: string;
 }
 

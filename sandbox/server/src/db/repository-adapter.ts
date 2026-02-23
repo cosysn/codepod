@@ -109,26 +109,26 @@ export class RepositoryAdapter {
     const sandbox = this.sandboxRepo.getById(id);
     if (!sandbox) return undefined;
 
+    // Update sandbox host/port directly (unified port)
+    const updates: Partial<Sandbox> = {};
+    if (address.host) {
+      updates.host = address.host;
+    }
+    if (address.port) {
+      updates.port = address.port;
+    }
+
+    // Update agent info token
     const agentInfo: AgentInfo = {
       ...sandbox.agentInfo,
       lastHeartbeat: sandbox.agentInfo?.lastHeartbeat || new Date().toISOString(),
     };
-
-    if (address.host) {
-      agentInfo.addressHost = address.host;
-    }
-    if (address.port) {
-      agentInfo.addressPort = address.port;
-    }
     if (address.token) {
       agentInfo.addressToken = address.token;
     }
-    // Build combined address string
-    if (agentInfo.addressHost && agentInfo.addressPort) {
-      agentInfo.address = `${agentInfo.addressHost}:${agentInfo.addressPort}`;
-    }
+    updates.agentInfo = agentInfo;
 
-    return this.sandboxRepo.update(id, { agentInfo } as Partial<Sandbox>);
+    return this.sandboxRepo.update(id, updates);
   }
 
   updateSandboxRunnerStatus(

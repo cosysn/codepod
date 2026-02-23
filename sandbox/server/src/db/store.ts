@@ -94,29 +94,28 @@ export class Store {
     return sandbox;
   }
 
-  // UpdateAgentAddress updates the agent gRPC address
+  // UpdateAgentAddress updates the agent address (for unified port)
+  // Note: With unified port, host/port are stored in sandbox.host/sandbox.port
   updateAgentAddress(id: string, address: { host?: string; port?: number; token?: string }): Sandbox | undefined {
     const sandbox = this.sandboxes.get(id);
     if (!sandbox) return undefined;
 
+    // Update sandbox host/port directly (unified port)
+    if (address.host) {
+      sandbox.host = address.host;
+    }
+    if (address.port) {
+      sandbox.port = address.port;
+    }
+
+    // Update agent info token
     if (!sandbox.agentInfo) {
       sandbox.agentInfo = {
         lastHeartbeat: new Date().toISOString(),
       };
     }
-
-    if (address.host) {
-      sandbox.agentInfo.addressHost = address.host;
-    }
-    if (address.port) {
-      sandbox.agentInfo.addressPort = address.port;
-    }
     if (address.token) {
       sandbox.agentInfo.addressToken = address.token;
-    }
-    // Build combined address string
-    if (sandbox.agentInfo.addressHost && sandbox.agentInfo.addressPort) {
-      sandbox.agentInfo.address = `${sandbox.agentInfo.addressHost}:${sandbox.agentInfo.addressPort}`;
     }
 
     this.sandboxes.set(id, sandbox);
