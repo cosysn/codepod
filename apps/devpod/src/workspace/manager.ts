@@ -6,7 +6,6 @@ import {
   deleteSandbox,
   stopSandbox,
   startSandbox,
-  getSandboxToken,
   createVolume,
   deleteVolume,
   saveWorkspaceMeta,
@@ -14,7 +13,6 @@ import {
   deleteWorkspaceMeta,
   listWorkspaces
 } from '../api/client';
-import { SSHService } from '../services/ssh';
 import { WorkspaceMeta } from '../types';
 import { configManager } from '../config';
 import { ImageResolver } from '../image';
@@ -37,7 +35,7 @@ export class WorkspaceManager {
 
   constructor() {
     this.registry = configManager.getRegistry();
-    this.builderImage = `${this.registry}/codepod/builder:latest`;
+    this.builderImage = `10.0.0.15:5000/codepod/devcontainer:v11`;
     this.imageResolver = new ImageResolver({
       preferCache: true,
       cacheRegistry: this.registry,
@@ -149,68 +147,53 @@ export class WorkspaceManager {
     }
   }
 
+  private async runCommandWithLogs(
+    sandbox: Sandbox,
+    cmd: string,
+    options?: { timeout?: number; cwd?: string }
+  ): Promise<number> {
+    return new Promise((resolve, reject) => {
+      let exitCode = 0;
+      sandbox.commands.run(cmd, {
+        timeout: options?.timeout || 600000,
+        cwd: options?.cwd,
+        onStdout: (data: string) => process.stdout.write(data),
+        onStderr: (data: string) => process.stderr.write(data)
+      }).then(result => {
+        exitCode = result.exitCode;
+        if (exitCode !== 0) {
+          reject(new Error(`Command failed with exit code ${exitCode}`));
+        } else {
+          resolve(exitCode);
+        }
+      }).catch(reject);
+    });
+  }
+
   private async buildImage(
     sandbox: Sandbox,
     volumeId: string,
     options: BuildOptions
   ): Promise<void> {
-    // Connect to builder
-    const token = await getSandboxToken(sandbox.id);
-    const ssh = await SSHService.connectWithPassword(
-      sandbox.host,
-      sandbox.port,
-      sandbox.user,
-      token
-    );
-
     try {
       // Clone repository
       console.log('Cloning repository...');
       const cloneCmd = `git clone --depth 1 ${options.repoUrl} /workspace/repo`;
-      await ssh.exec(cloneCmd);
+      await this.runCommandWithLogs(sandbox, cloneCmd);
 
-      // Build image - use host.docker.internal for registry inside container (registry runs on host network)
-      const dockerfilePath = options.dockerfilePath || '/workspace/repo/.devcontainer/Dockerfile';
+      // Build image with envbuilder
       const containerRegistry = this.resolveRegistryForContainer(this.registry);
-
-      // Extract registry host:port for --insecure-registry flag (needed for self-signed certs)
-      const containerRegistryHost = containerRegistry.split('/')[0];
-      const insecureFlag = ` --insecure-registry ${containerRegistryHost}`;
-
-      // Use container registry for both build and push (host.docker.internal:5000 for container)
       const imageName = `workspace/${options.name}:latest`;
       const fullImageName = `${containerRegistry}/${imageName}`;
-      const buildCmd = `cd /workspace && docker build -f ${dockerfilePath} -t ${fullImageName} /workspace/repo`;
 
-      console.log('Building Docker image...');
-      console.log('Build command:', buildCmd);
-      const buildResult = await ssh.exec(buildCmd);
-      console.log('Build stdout:', buildResult.stdout);
-      console.log('Build stderr:', buildResult.stderr);
-      console.log('Build exit code:', buildResult.exitCode);
-
-      if (buildResult.exitCode !== 0) {
-        throw new Error(`Docker build failed: ${buildResult.stderr}`);
-      }
-
-      // Push image to container registry (host.docker.internal:5000)
-      // The runner can pull from localhost:5000 because Docker routes internally
-      console.log('Pushing image...');
-      const pushCmd = `docker${insecureFlag} push ${fullImageName}`;
-      console.log('Push command:', pushCmd);
-      const pushResult = await ssh.exec(pushCmd);
-      console.log('Push stdout:', pushResult.stdout);
-      console.log('Push stderr:', pushResult.stderr);
-      console.log('Push exit code:', pushResult.exitCode);
-
-      if (pushResult.exitCode !== 0) {
-        throw new Error(`Docker push failed: ${pushResult.stderr}`);
-      }
+      console.log('Building image with envbuilder...');
+      const buildCmd = `envbuilder build --workspace /workspace/repo --image ${fullImageName} --push`;
+      await this.runCommandWithLogs(sandbox, buildCmd, { cwd: '/workspace' });
 
       console.log('Image built successfully!');
 
-    } finally {
-      ssh.disconnect();
+    } catch (error) {
+      throw new Error(`Build failed: ${error}`);
     }
   }
 

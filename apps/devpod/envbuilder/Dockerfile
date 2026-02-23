@@ -1,26 +1,5 @@
-# Build stage (skipped - binary copied from host)
-# FROM golang:1.21-alpine AS builder
-# RUN CGO_ENABLED=0 GOOS=linux go build -o envbuilder ./cmd
-
-# Runtime stage
-FROM alpine:3.19
-
-RUN apk add --no-cache \
-    ca-certificates \
-    tzdata \
-    bash \
-    docker \
-    curl \
-    nano \
-    git \
-    wget
-
-# Install Go 1.25 (using Aliyun mirror for China network)
-RUN wget -q https://mirrors.aliyun.com/golang/go1.25.0.linux-amd64.tar.gz && \
-    tar -C /usr/local -xzf go1.25.0.linux-amd64.tar.gz && \
-    rm go1.25.0.linux-amd64.tar.gz
-ENV PATH="/usr/local/go/bin:${PATH}"
-ENV GOPATH="/root/go"
+# Runtime stage - based on v10 which already has Go 1.25, Node.js, Docker, etc.
+FROM 10.0.0.15:5000/codepod/devcontainer:v10
 
 # Configure Docker registry mirror
 RUN mkdir -p /etc/docker && \
@@ -31,6 +10,9 @@ COPY --from=registry.cn-hangzhou.aliyuncs.com/kaniko-project/executor:latest /ka
 
 # Copy pre-built envbuilder binary
 COPY envbuilder /usr/local/bin/envbuilder
+
+# Configure Kaniko registry mirror for China network
+ENV KANIKO_REGISTRY_MIRROR="registry.docker-cn.com;mirror.ccs.tencentyun.com"
 
 WORKDIR /workspace
 
