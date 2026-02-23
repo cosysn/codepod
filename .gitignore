@@ -35,3 +35,9 @@ bin/
 
 docker/data/
 sandbox/server/data/
+
+# DevPod binaries (exact paths)
+apps/devpod/envbuilder/envbuilder
+
+# Misc
+.cache

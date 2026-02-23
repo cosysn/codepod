@@ -2,10 +2,12 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { Sandbox } from '@codepod/sdk-ts';
+import { Client } from 'ssh2';
 import {
   createSandbox,
   createSandboxAndWait,
   getSandbox,
+  getSandboxToken,
   deleteSandbox,
   stopSandbox,
   startSandbox,
@@ -38,7 +40,8 @@ export class WorkspaceManager {
 
   constructor() {
     this.registry = configManager.getRegistry();
-    this.builderImage = `10.0.0.15:5000/codepod/devcontainer:v11`;
+    // TODO: Fix - use ubuntu temporarily until devcontainer image is rebuilt properly
+    this.builderImage = `10.0.0.15:5000/codepod/devcontainer:v12`;
     this.imageResolver = new ImageResolver({
       preferCache: true,
       cacheRegistry: this.registry,
@@ -78,7 +81,6 @@ export class WorkspaceManager {
 
     // Copy SSH credentials before git clone
     await copyCredentialsToSandbox(builder);
-    console.log('');
 
     // Save metadata
     const meta: WorkspaceMeta = {
@@ -128,6 +130,9 @@ export class WorkspaceManager {
       }, 180);
       console.log(`Dev sandbox created: ${dev.id}`);
       console.log(`Dev SSH: ${dev.host}:${dev.port}`);
+
+      // Copy SSH credentials to dev sandbox for git operations
+      await copyCredentialsToSandbox(dev);
       console.log('');
 
       // Update metadata
@@ -159,22 +164,40 @@ export class WorkspaceManager {
     cmd: string,
     options?: { timeout?: number; cwd?: string }
   ): Promise<number> {
-    return new Promise((resolve, reject) => {
-      let exitCode = 0;
-      sandbox.commands.run(cmd, {
+    // The SDK handles connection retry automatically, no need to explicitly close
+    try {
+      const result = await sandbox.commands.run(cmd, {
         timeout: options?.timeout || 600000,
         cwd: options?.cwd,
         onStdout: (data: string) => process.stdout.write(data),
         onStderr: (data: string) => process.stderr.write(data)
-      }).then(result => {
-        exitCode = result.exitCode;
-        if (exitCode !== 0) {
-          reject(new Error(`Command failed with exit code ${exitCode}`));
-        } else {
-          resolve(exitCode);
+      });
+
+      if (result.exitCode !== 0) {
+        throw new Error(`Command failed with exit code ${result.exitCode}`);
+      }
+      return result.exitCode;
+    } catch (error: any) {
+      // If gRPC fails, try SSH fallback
+      const isGRPCError = error?.message?.includes('Failed to connect') ||
+                         error?.message?.includes('deadline') ||
+                         error?.code === 'RESOURCE_EXHAUSTED';
+
+      if (isGRPCError) {
+        console.warn('gRPC failed, trying SSH fallback...');
+        const token = await getSandboxToken(sandbox.id);
+        const sshResult = await runCommandViaSSH(
+          'localhost', 2222, token,
+          cmd,
+          { timeout: options?.timeout || 600000, cwd: options?.cwd }
+        );
+        if (sshResult.exitCode !== 0) {
+          throw new Error(`Command failed with exit code ${sshResult.exitCode}`);
         }
-      }).catch(reject);
-    });
+        return sshResult.exitCode;
+      }
+      throw error;
+    }
   }
 
   private async buildImage(
@@ -182,16 +205,35 @@ export class WorkspaceManager {
     volumeId: string,
     options: BuildOptions
   ): Promise<void> {
+    // Test connection and retry if needed
+    for (let i = 0; i < 3; i++) {
+      try {
+        await sandbox.commands.run('echo test', { timeout: 30000 });
+        break;
+      } catch (e: any) {
+        console.warn(`Connection test failed (attempt ${i+1}/3):`, e.message);
+        if (i < 2) {
+          await new Promise(r => setTimeout(r, 3000));
+        }
+      }
+    }
+
     try {
       // Clone repository - try HTTPS first, fall back to SSH if needed
       console.log('Cloning repository...');
-      let cloneCmd = `git clone --depth 1 ${options.repoUrl} /workspace/repo`;
+      // Remove existing directory if present (for retry scenarios)
+      let cloneCmd = `rm -rf /workspace/repo && git clone -q --depth 1 ${options.repoUrl} /workspace/repo 2>&1`;
 
       // Check if we should use SSH (if HTTPS fails, user can provide SSH URL)
-      if (options.repoUrl.includes('git@') || options.repoUrl.includes('ssh://')) {
-        // Use SSH with host key checking disabled
-        cloneCmd = `GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no" git clone --depth 1 ${options.repoUrl} /workspace/repo`;
+      let repoUrl = options.repoUrl;
+      if (options.repoUrl.includes('git@')) {
+        // Convert SSH URL to HTTPS for better compatibility
+        // e.g., git@gitee.com:cosysn/codepod.git -> https://gitee.com/cosysn/codepod.git
+        repoUrl = 'https://' + options.repoUrl.replace('git@', '').replace(':', '/');
+      } else if (options.repoUrl.includes('ssh://')) {
+        repoUrl = options.repoUrl.replace('ssh://', 'https://');
       }
+      cloneCmd = `rm -rf /workspace/repo && git clone -q --depth 1 ${repoUrl} /workspace/repo 2>&1`;
       await this.runCommandWithLogs(sandbox, cloneCmd);
 
       // Verify clone succeeded
@@ -338,7 +380,18 @@ export function getWorkspaceManager(): WorkspaceManager {
 }
 
 /**
+ * Validate path to prevent command injection
+ */
+function validatePath(input: string, name: string): void {
+  // Only allow alphanumeric, dash, underscore, dot, and forward slash
+  if (!/^[a-zA-Z0-9_./-]+$/.test(input)) {
+    throw new Error(`Invalid path characters in ${name}: ${input}`);
+  }
+}
+
+/**
  * Copy SSH credentials and gitconfig from local machine to sandbox
+ * Uses tar + base64 to transfer entire directory in one command
  */
 async function copyCredentialsToSandbox(sandbox: Sandbox): Promise<void> {
   const homeDir = os.homedir();
@@ -347,17 +400,132 @@ async function copyCredentialsToSandbox(sandbox: Sandbox): Promise<void> {
 
   console.log('Copying SSH credentials to sandbox...');
 
-  // Copy SSH directory
-  if (fs.existsSync(sshDir)) {
-    await copyDirectoryWithPermissions(sandbox, sshDir, '/root/.ssh');
-  }
+  try {
+    // Wait for sandbox to be ready
+    console.log('Waiting for sandbox agent to initialize...');
+    await new Promise(resolve => setTimeout(resolve, 5000));
 
-  // Copy .gitconfig
-  if (fs.existsSync(gitconfigPath)) {
-    await copyFileWithPermissions(sandbox, gitconfigPath, '/root/.gitconfig');
-  }
+    // Get token for SSH fallback
+    const token = await getSandboxToken(sandbox.id);
 
-  console.log('SSH credentials copied successfully');
+    // Use gRPC first, fallback to SSH
+    try {
+      // Copy SSH directory using tar + base64
+      if (fs.existsSync(sshDir)) {
+        const tarCmd = `cd /root && tar -cf - -C ${homeDir} .ssh 2>/dev/null | base64 -w0`;
+        const content = execSync(tarCmd);
+        await sandbox.commands.run(
+          `mkdir -p /root/.ssh && printf '%s' '${content}' | base64 -d | tar -xf - -C /root && chmod 700 /root/.ssh && chmod 600 /root/.ssh/id_* 2>/dev/null || true`,
+          { timeout: 30000 }
+        );
+      }
+
+      // Copy .gitconfig
+      if (fs.existsSync(gitconfigPath)) {
+        const content = fs.readFileSync(gitconfigPath).toString('base64');
+        await sandbox.commands.run(
+          `printf '%s' '${content}' | base64 -d > /root/.gitconfig && chmod 644 /root/.gitconfig`,
+          { timeout: 10000 }
+        );
+      }
+    } catch (err: any) {
+      console.warn('gRPC failed, using SSH fallback...');
+      // Fallback to SSH for credentials
+      if (fs.existsSync(sshDir)) {
+        const tarCmd = `cd /root && tar -cf - -C ${homeDir} .ssh 2>/dev/null | base64 -w0`;
+        const content = execSync(tarCmd);
+        await runCommandViaSSH('localhost', 2222, token,
+          `mkdir -p /root/.ssh && printf '%s' '${content}' | base64 -d | tar -xf - -C /root && chmod 700 /root/.ssh && chmod 600 /root/.ssh/id_* 2>/dev/null || true`,
+          { timeout: 30000 }
+        );
+      }
+      if (fs.existsSync(gitconfigPath)) {
+        const content = fs.readFileSync(gitconfigPath).toString('base64');
+        await runCommandViaSSH('localhost', 2222, token,
+          `printf '%s' '${content}' | base64 -d > /root/.gitconfig && chmod 644 /root/.gitconfig`,
+          { timeout: 10000 }
+        );
+      }
+    }
+
+    console.log('SSH credentials copied successfully');
+  } catch (error) {
+    console.warn('Failed to copy SSH credentials:', error);
+    console.warn('Continuing without SSH credentials...');
+  }
+}
+
+/**
+ * Execute command via SSH (fallback when gRPC fails)
+ */
+async function runCommandViaSSH(
+  host: string,
+  port: number,
+  password: string,
+  command: string,
+  options?: { timeout?: number; cwd?: string }
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  return new Promise((resolve, reject) => {
+    const conn = new Client();
+    const timeout = options?.timeout || 60000;
+
+    const timeoutHandle = setTimeout(() => {
+      conn.end();
+      reject(new Error(`Command timed out after ${timeout}ms`));
+    }, timeout);
+
+    conn.on('ready', () => {
+      const cwd = options?.cwd || '/root';
+      conn.exec(`cd ${cwd} && ${command}`, (err, stream) => {
+        if (err) {
+          clearTimeout(timeoutHandle);
+          conn.end();
+          reject(err);
+          return;
+        }
+
+        let stdout = '';
+        let stderr = '';
+
+        stream.on('close', (code: number) => {
+          clearTimeout(timeoutHandle);
+          conn.end();
+          resolve({ stdout, stderr, exitCode: code || 0 });
+        });
+
+        stream.on('data', (data: Buffer) => {
+          stdout += data.toString();
+          process.stdout.write(data);
+        });
+
+        stream.stderr.on('data', (data: Buffer) => {
+          stderr += data.toString();
+          process.stderr.write(data);
+        });
+      });
+    });
+
+    conn.on('error', (err) => {
+      clearTimeout(timeoutHandle);
+      reject(err);
+    });
+
+    conn.connect({
+      host,
+      port,
+      username: 'root',
+      password,
+      readyTimeout: 30000,
+    });
+  });
+}
+
+/**
+ * Execute command locally and return output
+ */
+function execSync(cmd: string): string {
+  const { execSync: sync } = require('child_process');
+  return sync(cmd, { encoding: 'utf-8' }).trim();
 }
 
 /**
@@ -368,24 +536,31 @@ async function copyDirectoryWithPermissions(
   localDir: string,
   remoteDir: string
 ): Promise<void> {
-  // Create remote directory
-  await sandbox.commands.run(`mkdir -p ${remoteDir}`);
+  try {
+    // Validate paths to prevent command injection
+    validatePath(remoteDir, 'remoteDir');
 
-  const files = fs.readdirSync(localDir);
+    // Create remote directory
+    await sandbox.commands.run(`mkdir -p ${remoteDir}`);
 
-  for (const file of files) {
-    const localPath = path.join(localDir, file);
-    const stat = fs.statSync(localPath);
+    const files = fs.readdirSync(localDir);
 
-    // Skip directories
-    if (stat.isDirectory()) continue;
+    for (const file of files) {
+      const localPath = path.join(localDir, file);
+      const stat = fs.statSync(localPath);
 
-    const remotePath = `${remoteDir}/${file}`;
-    await copyFileWithPermissions(sandbox, localPath, remotePath);
+      // Skip directories
+      if (stat.isDirectory()) continue;
+
+      const remotePath = `${remoteDir}/${file}`;
+      await copyFileWithPermissions(sandbox, localPath, remotePath);
+    }
+
+    // Set directory permissions
+    await sandbox.commands.run(`chmod 700 ${remoteDir}`);
+  } catch (error) {
+    throw new Error(`Failed to copy directory ${localDir}: ${error}`);
   }
-
-  // Set directory permissions
-  await sandbox.commands.run(`chmod 700 ${remoteDir}`);
 }
 
 /**
@@ -396,16 +571,29 @@ async function copyFileWithPermissions(
   localPath: string,
   remotePath: string
 ): Promise<void> {
-  const content = fs.readFileSync(localPath);
-  const encoded = content.toString('base64');
+  try {
+    // Check if file exists
+    if (!fs.existsSync(localPath)) {
+      console.log(`Skipping non-existent file: ${localPath}`);
+      return;
+    }
 
-  // Use printf to avoid echo newline issues
-  await sandbox.commands.run(
-    `printf '%s' '${encoded}' | base64 -d > ${remotePath}`
-  );
+    // Validate paths to prevent command injection
+    validatePath(remotePath, 'remotePath');
 
-  // Set permissions: private keys 600, others 644
-  const isPrivateKey = localPath.includes('id_rsa') || localPath.includes('id_ed25519');
-  const perm = isPrivateKey ? '600' : '644';
-  await sandbox.commands.run(`chmod ${perm} ${remotePath}`);
+    const content = fs.readFileSync(localPath);
+    const encoded = content.toString('base64');
+
+    // Use printf to avoid echo newline issues
+    await sandbox.commands.run(
+      `printf '%s' '${encoded}' | base64 -d > ${remotePath}`
+    );
+
+    // Set permissions: private keys 600, others 644
+    const isPrivateKey = localPath.includes('id_rsa') || localPath.includes('id_ed25519');
+    const perm = isPrivateKey ? '600' : '644';
+    await sandbox.commands.run(`chmod ${perm} ${remotePath}`);
+  } catch (error) {
+    throw new Error(`Failed to copy file ${localPath}: ${error}`);
+  }
 }
