@@ -265,11 +265,10 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 
 	// Build environment variables
 	env := map[string]string{
-		"AGENT_TOKEN":        agentToken,
-		"AGENT_SANDBOX_ID":  job.SandboxID,
-		"AGENT_SERVER_URL":   r.cfg.Server.URL,
-		"AGENT_SSH_PORT":     "2222", // Use non-privileged port to avoid conflicts
-		"AGENT_GRPC_PORT":    "50052", // gRPC server port for command execution
+		"AGENT_TOKEN":       agentToken,
+		"AGENT_SANDBOX_ID": job.SandboxID,
+		"AGENT_SERVER_URL":  r.cfg.Server.URL,
+		"AGENT_SSH_PORT":   "2222", // Unified port for SSH and gRPC
 	}
 
 	// Add CA public key if available (base64 encoded to avoid newline issues in env vars)

@@ -106,10 +106,9 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 		Memory:     memory,
 		CPUPeriod:  100000,
 		CPUShares:  int64(opts.CPU * 1024),
-		// Publish SSH port (2222) and Agent gRPC port (50052) to host
+		// Publish SSH port (2222) - unified port for SSH and gRPC
 		Ports: []docker.PortBinding{
 			{ContainerPort: 2222, HostPort: 0, Protocol: "tcp"},
-			{ContainerPort: 50052, HostPort: 0, Protocol: "tcp"},  // Agent gRPC
 		},
 		// Add host.docker.internal to access host services from inside the container
 		ExtraHosts: []string{"host.docker.internal:host-gateway"},
