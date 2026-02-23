@@ -25,7 +25,7 @@ type Server struct {
 	sshAddr     string
 	sshHandler  func(net.Listener) error
 	grpcHandler func(net.Listener) error
-	stopChan    chan struct{}
+	listener    net.Listener
 }
 
 // New creates a new multiplex server
@@ -34,7 +34,6 @@ func New(sshAddr string, sshHandler func(net.Listener) error, grpcHandler func(n
 		sshAddr:     sshAddr,
 		sshHandler:  sshHandler,
 		grpcHandler: grpcHandler,
-		stopChan:    make(chan struct{}),
 	}
 }
 
@@ -45,6 +44,9 @@ func (s *Server) Start() error {
 	if err != nil {
 		return fmt.Errorf("failed to listen on %s: %w", s.sshAddr, err)
 	}
+
+	// Store listener reference for graceful shutdown
+	s.listener = listener
 
 	// Create cmux matcher
 	m := cmux.New(listener)
@@ -69,18 +71,14 @@ func (s *Server) Start() error {
 		}
 	}()
 
-	// Block until stopped
-	<-s.stopChan
-
-	// Close the listener to stop cmux.Serve()
-	if err := listener.Close(); err != nil {
-		fmt.Printf("Error closing listener: %v\n", err)
-	}
-
-	return nil
+	// Start serving - this blocks and routes connections to matched listeners
+	// It will return when the listener is closed (e.g., by Stop())
+	return m.Serve()
 }
 
 // Stop gracefully stops the multiplexed server
 func (s *Server) Stop() {
-	close(s.stopChan)
+	if s.listener != nil {
+		s.listener.Close()
+	}
 }
