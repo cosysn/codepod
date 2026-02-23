@@ -1,5 +1,5 @@
-# Runtime stage - based on v10 which already has Go 1.25, Node.js, Docker, etc.
-FROM 10.0.0.15:5000/codepod/devcontainer:v10
+# Runtime stage - based on ubuntu-builder which has Go, Node.js, Docker
+FROM localhost:5000/codepod/ubuntu-builder:latest
 
 # Configure Docker registry mirror
 RUN mkdir -p /etc/docker && \
