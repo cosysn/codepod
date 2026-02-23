@@ -65,6 +65,7 @@ type CreateOptions struct {
 	AgentToken      string  // Token for agent to authenticate
 	AgentServerURL  string  // Server URL for agent to connect
 	MountDockerSocket bool  // Mount /var/run/docker.sock for Docker-in-Docker
+	Volumes         []VolumeInfo // Volumes to mount
 }
 
 // NewManager creates a new sandbox manager
@@ -123,6 +124,26 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 			Target:   "/var/run/docker.sock",
 			ReadOnly: false,
 		})
+	}
+
+	// Mount volumes if specified
+	if len(opts.Volumes) > 0 {
+		log.Printf("DEBUG: Mounting %d volumes for container %s", len(opts.Volumes), opts.Name)
+		for _, vol := range opts.Volumes {
+			// Create the volume if it doesn't exist
+			volumeName := vol.VolumeID
+			if err := m.docker.EnsureVolume(ctx, volumeName); err != nil {
+				log.Printf("Warning: failed to ensure volume %s: %v", volumeName, err)
+				continue
+			}
+			// Mount the volume
+			config.Volumes = append(config.Volumes, docker.VolumeMount{
+				Type:   "volume",
+				Source: volumeName,
+				Target: vol.MountPath,
+			})
+			log.Printf("DEBUG: Mounted volume %s at %s", volumeName, vol.MountPath)
+		}
 	}
 	// Use provided network mode or default to bridge
 	if opts.NetworkMode == "" || opts.NetworkMode == "bridge" {

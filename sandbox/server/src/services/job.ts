@@ -30,6 +30,7 @@ export interface Job {
   memory?: string;
   cpu?: number;
   networkMode?: string;
+  volumes?: { volumeId: string; mountPath: string }[];
 }
 
 /**

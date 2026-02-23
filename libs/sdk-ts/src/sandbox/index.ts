@@ -119,6 +119,7 @@ export class Sandbox {
   private sandbox: SandboxType;
   private grpcClient: grpc.Client | null = null;
   private grpcToken: string | null = null;
+  private commandsInstance: Commands | null = null;
 
   /**
    * Create a new sandbox and wait for it to be ready
@@ -163,18 +164,31 @@ export class Sandbox {
 
   /**
    * Get the commands interface for executing commands
+   * Cache the instance to preserve connection state
    */
   get commands(): Commands {
-    return new Commands(this.client, this);
+    if (!this.commandsInstance) {
+      this.commandsInstance = new Commands(this.client, this);
+    }
+    return this.commandsInstance;
   }
 
   /**
    * Close the gRPC connection
    */
   async close(): Promise<void> {
+    await this.closeGrpcClient();
+  }
+
+  /**
+   * Close the gRPC client and force a new connection on next request
+   * Used for retry logic after transient errors
+   */
+  async closeGrpcClient(): Promise<void> {
     if (this.grpcClient) {
       this.grpcClient.close();
       this.grpcClient = null;
+      this.grpcToken = null;
     }
   }
 
@@ -182,12 +196,21 @@ export class Sandbox {
    * Get or create gRPC client for the sandbox
    */
   private async getGrpcClient(): Promise<grpc.Client> {
+    // Always get fresh connection info and recreate client to ensure valid token
     if (this.grpcClient) {
-      return this.grpcClient;
+      console.log('DEBUG: Closing existing gRPC client to refresh token');
+      try {
+        this.grpcClient.close();
+      } catch (e: any) {
+        console.log('DEBUG: Error closing client:', e.message);
+      }
+      this.grpcClient = null;
     }
 
     // Get connection info from server
+    console.log('DEBUG: Getting connection info for sandbox:', this.sandbox.id);
     const connectionInfo = await this.client.getConnectionInfo(this.sandbox.id);
+    console.log('DEBUG: Connection info:', { host: connectionInfo.host, port: connectionInfo.port, token: connectionInfo.token?.substring(0, 8) + '...' });
 
     // Cache the token for reuse
     this.grpcToken = connectionInfo.token;
@@ -201,15 +224,17 @@ export class Sandbox {
       `${connectionInfo.host}:${connectionInfo.port}`,
       credentials,
       {
-        'grpc.keepalive_time_ms': 30000,
-        'grpc.keepalive_timeout_ms': 10000,
+        'grpc.keepalive_time_ms': 120000, // Reduce pings to avoid "excess pings" error
+        'grpc.keepalive_timeout_ms': 30000,
         'grpc.enable_retries': 1,
+        'grpc.http2.min_time_between_pings_ms': 120000, // Additional setting to reduce pings
       }
     );
 
-    // Wait for the client to be ready
+    // Wait for the client to be ready (increase timeout for slower sandboxes)
+    console.log('DEBUG: Waiting for gRPC client to be ready...');
     await new Promise<void>((resolve, reject) => {
-      client.waitForReady(Date.now() + 10000, (error) => {
+      client.waitForReady(Date.now() + 60000, (error) => {
         if (error) {
           reject(error);
         } else {
@@ -423,6 +448,63 @@ export class Commands {
       env,
     } = options || {};
 
+    // Retry logic for transient gRPC errors
+    const maxRetries = 10;
+    const retryDelay = 5000;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await this.runCommandInternal(command, { onStdout, onStderr, timeout, cwd, env });
+      } catch (error: any) {
+        // Check if it's a transient error worth retrying
+        const errorMessage = error?.message || '';
+        const errorCode = error?.code;
+
+        // Check for deadline/connection errors
+        const isDeadlineError = errorMessage.includes('Failed to connect before the deadline') ||
+                               errorMessage.includes('Deadline exceeded') ||
+                               errorMessage.includes('deadline') ||
+                               errorCode === '4' ||
+                               !errorCode; // No code often means connection error in grpc-js
+
+        const isTransientError = errorCode === 'RESOURCE_EXHAUSTED' ||
+                                  errorCode === 'UNAVAILABLE' ||
+                                  errorCode === '14' || // Connection dropped
+                                  errorMessage.includes('Bandwidth exhausted') ||
+                                  errorMessage.includes('excess pings') ||
+                                  isDeadlineError;
+
+        if (isTransientError && attempt < maxRetries - 1) {
+          console.warn(`gRPC error (attempt ${attempt + 1}/${maxRetries}): ${error.message}. Retrying in ${retryDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, retryDelay));
+
+          // Force create a new gRPC connection for next attempt
+          await this.sandboxInstance['closeGrpcClient']();
+          continue;
+        }
+
+        throw error;
+      }
+    }
+
+    throw new Error('Command failed after retries');
+  }
+
+  /**
+   * Internal method to execute a command
+   */
+  private async runCommandInternal(
+    command: string,
+    options: {
+      onStdout?: (data: string) => void;
+      onStderr?: (data: string) => void;
+      timeout?: number;
+      cwd?: string;
+      env?: Record<string, string>;
+    }
+  ): Promise<CommandResult> {
+    const { onStdout, onStderr, timeout = 60000, cwd, env } = options;
+
     // Collect stdout and stderr
     let stdout = '';
     let stderr = '';
@@ -457,9 +539,11 @@ export class Commands {
         timeout: timeout,
       };
 
-      // Create metadata with token (reuse from getGrpcClient to avoid duplicate call)
+      // Get fresh token from connection info each time to avoid stale token issues
+      const connectionInfo = await this.sandboxInstance['client'].getConnectionInfo(this.sandboxInstance.id);
+      console.log('DEBUG: SDK sending token:', connectionInfo.token, 'length:', connectionInfo.token.length);
       const metadata = new grpc.Metadata();
-      metadata.add('token', this.sandboxInstance['getGrpcToken']() || '');
+      metadata.add('token', connectionInfo.token);
 
       // Use the proto's serialize method for message encoding
       const ExecuteRequest = proto.grpc.ExecuteRequest;

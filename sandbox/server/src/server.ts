@@ -267,10 +267,10 @@ async function handleAPIRequest(req: Request, res: Response): Promise<void> {
       return;
     }
 
-    // Return agent connection info
+    // Return agent connection info - always use sandbox.token, ignore addressToken
     const host = sandbox.agentInfo?.addressHost || sandbox.host;
     const port = sandbox.agentInfo?.addressPort || sandbox.port;
-    const token = sandbox.agentInfo?.addressToken || sandbox.token;
+    const token = sandbox.token;
 
     res.status(200).json({ host, port, token });
     return;

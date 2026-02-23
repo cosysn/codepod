@@ -37,6 +37,7 @@ export class SandboxService {
       sandboxId: sandbox.id,
       image: req.image || sandbox.image,
       token: token,
+      volumes: req.volumes,
     });
 
     return {

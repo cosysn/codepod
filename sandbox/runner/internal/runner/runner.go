@@ -265,10 +265,11 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 
 	// Build environment variables
 	env := map[string]string{
-		"AGENT_TOKEN":       agentToken,
-		"AGENT_SANDBOX_ID": job.SandboxID,
-		"AGENT_SERVER_URL":  r.cfg.Server.URL,
-		"AGENT_SSH_PORT":    "2222", // Use non-privileged port to avoid conflicts
+		"AGENT_TOKEN":        agentToken,
+		"AGENT_SANDBOX_ID":  job.SandboxID,
+		"AGENT_SERVER_URL":   r.cfg.Server.URL,
+		"AGENT_SSH_PORT":     "2222", // Use non-privileged port to avoid conflicts
+		"AGENT_GRPC_PORT":    "50052", // gRPC server port for command execution
 	}
 
 	// Add CA public key if available (base64 encoded to avoid newline issues in env vars)
@@ -296,6 +297,7 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 		AgentToken:       agentToken,
 		AgentServerURL:   r.cfg.Server.URL,
 		MountDockerSocket: mountDockerSocket,
+		Volumes:          job.Volumes,
 	}
 
 	// Create sandbox
@@ -354,6 +356,7 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 		}
 	}
 	if sb.AgentPort > 0 {
+		log.Printf("DEBUG: Pushing agent address - token: %s (length: %d)", agentTokenForAddress, len(agentTokenForAddress))
 		if err := r.client.UpdateAgentAddress(ctx, job.SandboxID, &AgentAddressUpdate{
 			Host:  r.getHost(),
 			Port:  sb.AgentPort,

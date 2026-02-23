@@ -52,8 +52,14 @@ func (p *Pusher) PushImage(imageName string) error {
 		return fmt.Errorf("image name cannot be empty")
 	}
 
-	// Tag image with registry prefix
-	taggedName := fmt.Sprintf("%s/%s", p.registry, imageName)
+	// Check if imageName already includes a registry (contains /)
+	// If it does, don't add the registry prefix again
+	var taggedName string
+	if strings.Contains(imageName, "/") {
+		taggedName = imageName
+	} else {
+		taggedName = fmt.Sprintf("%s/%s", p.registry, imageName)
+	}
 
 	// Tag the image
 	output, err := p.cmdRunner.Output("docker", "tag", imageName, taggedName)

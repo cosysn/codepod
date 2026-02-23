@@ -26,7 +26,7 @@ export class SandboxRepository {
       'localhost',
       0,
       'root',
-      Math.random().toString(36).slice(2, 34),
+      Math.random().toString(36).slice(2, 12),
       now,
       req.timeout ? new Date(Date.now() + req.timeout * 1000).toISOString() : null,
       metadata ? JSON.stringify(metadata) : null

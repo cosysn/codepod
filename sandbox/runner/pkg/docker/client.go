@@ -25,6 +25,9 @@ type Client interface {
 	CreateNetwork(ctx context.Context, name string) (string, error)
 	RemoveNetwork(ctx context.Context, networkID string) error
 
+	// Volume operations
+	EnsureVolume(ctx context.Context, name string) error
+
 	// Logs
 	ContainerLogs(ctx context.Context, containerID string, follow bool) (io.ReadCloser, error)
 

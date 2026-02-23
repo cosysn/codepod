@@ -44,6 +44,7 @@ export interface CreateSandboxRequest {
   memory?: string;
   env?: Record<string, string>;
   timeout?: number;
+  volumes?: { volumeId: string; mountPath: string }[];
 }
 
 export interface SandboxResponse {

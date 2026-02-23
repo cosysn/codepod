@@ -249,3 +249,12 @@ func (m *MockClient) SetContainerState(id string, state ContainerState) {
 		c.state = state
 	}
 }
+
+// EnsureVolume creates a volume if it doesn't exist (mock implementation)
+func (m *MockClient) EnsureVolume(ctx context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	log.Printf("Mock: EnsureVolume %s", name)
+	return nil
+}

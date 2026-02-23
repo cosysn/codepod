@@ -247,6 +247,34 @@ func (r *RealClient) RemoveNetwork(ctx context.Context, networkID string) error 
 	return r.cli.NetworkRemove(ctx, networkID)
 }
 
+// EnsureVolume creates a volume if it doesn't exist
+func (r *RealClient) EnsureVolume(ctx context.Context, name string) error {
+	// Check if volume exists
+	volumes, err := r.cli.VolumeList(ctx, name)
+	if err != nil {
+		// If listing fails, try to create anyway
+		log.Printf("Warning: failed to list volumes: %v, trying to create", err)
+	}
+
+	// Check if our volume exists in the list
+	for _, v := range volumes.Volumes {
+		if v.Name == name {
+			log.Printf("Volume %s already exists", name)
+			return nil
+		}
+	}
+
+	// Volume doesn't exist, create it
+	_, err = r.cli.VolumeCreate(ctx, types.VolumeCreateRequest{
+		Name: name,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create volume %s: %w", name, err)
+	}
+	log.Printf("Created volume %s", name)
+	return nil
+}
+
 // ContainerLogs returns container logs
 func (r *RealClient) ContainerLogs(ctx context.Context, containerID string, follow bool) (io.ReadCloser, error) {
 	logs, err := r.cli.ContainerLogs(ctx, containerID, container.LogsOptions{

@@ -23,6 +23,13 @@ type Job struct {
 	Memory      string            `json:"memory,omitempty"`
 	CPU         int               `json:"cpu,omitempty"`
 	NetworkMode string            `json:"networkMode,omitempty"`
+	Volumes     []VolumeInfo      `json:"volumes,omitempty"`
+}
+
+// VolumeInfo represents a volume to mount
+type VolumeInfo struct {
+	VolumeID  string `json:"volumeId"`
+	MountPath string `json:"mountPath"`
 }
 
 // GrpcClientConfig holds the configuration for the gRPC client

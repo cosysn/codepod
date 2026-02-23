@@ -77,6 +77,7 @@ func main() {
 	}
 
 	log.Printf("Sandbox ID: %s", cfg.Agent.SandboxID)
+	log.Printf("Agent Token: %s (length: %d)", cfg.Agent.Token, len(cfg.Agent.Token))
 
 	// Create reporter client
 	reporterCfg := &reporter.Config{
