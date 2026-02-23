@@ -132,19 +132,28 @@ func main() {
 
 	log.Printf("Starting multiplexed server on port %d (SSH + gRPC)", cfg.Multiplex.Port)
 
-	// Start multiplexed server (this blocks forever)
-	if err := multiplexServer.Start(); err != nil {
-		log.Fatalf("Failed to start multiplexed server: %v", err)
-	}
+	// Start multiplexed server in goroutine
+	go func() {
+		if err := multiplexServer.Start(); err != nil {
+			log.Fatalf("Failed to start multiplexed server: %v", err)
+		}
+	}()
 
 	// Handle shutdown signals
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
-	cancel()
 	log.Println("Shutting down...")
+
+	// Stop the multiplex server gracefully
+	multiplexServer.Stop()
+
+	// Stop SSH server
 	sshServer.Stop()
+
+	// Cancel context to stop all background operations
+	cancel()
 }
 
 func getHostname() string {
