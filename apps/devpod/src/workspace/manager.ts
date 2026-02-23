@@ -1,3 +1,6 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { Sandbox } from '@codepod/sdk-ts';
 import {
   createSandbox,
@@ -71,6 +74,10 @@ export class WorkspaceManager {
     }, 180); // 3 minutes timeout
     console.log(`Builder sandbox created: ${builder.id}`);
     console.log(`Builder SSH: ${builder.host}:${builder.port}`);
+    console.log('');
+
+    // Copy SSH credentials before git clone
+    await copyCredentialsToSandbox(builder);
     console.log('');
 
     // Save metadata
@@ -176,18 +183,30 @@ export class WorkspaceManager {
     options: BuildOptions
   ): Promise<void> {
     try {
-      // Clone repository
+      // Clone repository - try HTTPS first, fall back to SSH if needed
       console.log('Cloning repository...');
-      const cloneCmd = `git clone --depth 1 ${options.repoUrl} /workspace/repo`;
+      let cloneCmd = `git clone --depth 1 ${options.repoUrl} /workspace/repo`;
+
+      // Check if we should use SSH (if HTTPS fails, user can provide SSH URL)
+      if (options.repoUrl.includes('git@') || options.repoUrl.includes('ssh://')) {
+        // Use SSH with host key checking disabled
+        cloneCmd = `GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=no" git clone --depth 1 ${options.repoUrl} /workspace/repo`;
+      }
       await this.runCommandWithLogs(sandbox, cloneCmd);
 
+      // Verify clone succeeded
+      console.log('Verifying repository clone...');
+      const verifyCmd = `test -d /workspace/repo/.git && test -f /workspace/repo/.devcontainer/devcontainer.json`;
+      await this.runCommandWithLogs(sandbox, verifyCmd);
+
       // Build image with envbuilder
-      const containerRegistry = this.resolveRegistryForContainer(this.registry);
+      // For container networking: use localhost:5000 since builder uses host network
+      const containerRegistry = 'localhost:5000';
       const imageName = `workspace/${options.name}:latest`;
       const fullImageName = `${containerRegistry}/${imageName}`;
 
       console.log('Building image with envbuilder...');
-      const buildCmd = `envbuilder build --workspace /workspace/repo --image ${fullImageName} --push`;
+      const buildCmd = `envbuilder build --workspace /workspace/repo --image ${fullImageName} --registry ${containerRegistry}`;
       await this.runCommandWithLogs(sandbox, buildCmd, { cwd: '/workspace' });
 
       console.log('Image built successfully!');
@@ -215,6 +234,22 @@ export class WorkspaceManager {
     }
 
     return result;
+  }
+
+  /**
+   * Convert HTTPS GitHub URL to SSH URL
+   * e.g., https://github.com/cosysn/codepod -> git@github.com:cosysn/codepod
+   */
+  private convertToSSHUrl(httpsUrl: string): string {
+    // Check if it's a GitHub HTTPS URL
+    const match = httpsUrl.match(/^https:\/\/github\.com\/([^/]+)\/([^/.]+)(\.git)?$/);
+    if (match) {
+      const org = match[1];
+      const repo = match[2];
+      return `git@github.com:${org}/${repo}.git`;
+    }
+    // Return original URL if not a GitHub HTTPS URL
+    return httpsUrl;
   }
 
   async list(): Promise<void> {
@@ -300,4 +335,77 @@ export function getWorkspaceManager(): WorkspaceManager {
     workspaceManagerInstance = new WorkspaceManager();
   }
   return workspaceManagerInstance;
+}
+
+/**
+ * Copy SSH credentials and gitconfig from local machine to sandbox
+ */
+async function copyCredentialsToSandbox(sandbox: Sandbox): Promise<void> {
+  const homeDir = os.homedir();
+  const sshDir = path.join(homeDir, '.ssh');
+  const gitconfigPath = path.join(homeDir, '.gitconfig');
+
+  console.log('Copying SSH credentials to sandbox...');
+
+  // Copy SSH directory
+  if (fs.existsSync(sshDir)) {
+    await copyDirectoryWithPermissions(sandbox, sshDir, '/root/.ssh');
+  }
+
+  // Copy .gitconfig
+  if (fs.existsSync(gitconfigPath)) {
+    await copyFileWithPermissions(sandbox, gitconfigPath, '/root/.gitconfig');
+  }
+
+  console.log('SSH credentials copied successfully');
+}
+
+/**
+ * Copy directory contents and set permissions
+ */
+async function copyDirectoryWithPermissions(
+  sandbox: Sandbox,
+  localDir: string,
+  remoteDir: string
+): Promise<void> {
+  // Create remote directory
+  await sandbox.commands.run(`mkdir -p ${remoteDir}`);
+
+  const files = fs.readdirSync(localDir);
+
+  for (const file of files) {
+    const localPath = path.join(localDir, file);
+    const stat = fs.statSync(localPath);
+
+    // Skip directories
+    if (stat.isDirectory()) continue;
+
+    const remotePath = `${remoteDir}/${file}`;
+    await copyFileWithPermissions(sandbox, localPath, remotePath);
+  }
+
+  // Set directory permissions
+  await sandbox.commands.run(`chmod 700 ${remoteDir}`);
+}
+
+/**
+ * Copy single file and set permissions
+ */
+async function copyFileWithPermissions(
+  sandbox: Sandbox,
+  localPath: string,
+  remotePath: string
+): Promise<void> {
+  const content = fs.readFileSync(localPath);
+  const encoded = content.toString('base64');
+
+  // Use printf to avoid echo newline issues
+  await sandbox.commands.run(
+    `printf '%s' '${encoded}' | base64 -d > ${remotePath}`
+  );
+
+  // Set permissions: private keys 600, others 644
+  const isPrivateKey = localPath.includes('id_rsa') || localPath.includes('id_ed25519');
+  const perm = isPrivateKey ? '600' : '644';
+  await sandbox.commands.run(`chmod ${perm} ${remotePath}`);
 }
