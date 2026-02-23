@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/codepod/codepod/sandbox/agent/pkg/config"
 	"github.com/codepod/codepod/sandbox/agent/pkg/grpc"
+	"github.com/codepod/codepod/sandbox/agent/pkg/multiplex"
 	"github.com/codepod/codepod/sandbox/agent/pkg/reporter"
 	"github.com/codepod/codepod/sandbox/agent/pkg/ssh"
 	sshc "golang.org/x/crypto/ssh"
@@ -87,7 +89,8 @@ func main() {
 	}
 	reporterClient := reporter.NewClient(reporterCfg)
 
-	server := ssh.NewServer(&ssh.ServerConfig{
+	// Create SSH server config (port is not used when using StartWithListener)
+	sshServer := ssh.NewServer(&ssh.ServerConfig{
 		Port:              cfg.SSH.Port,
 		HostKeys:          cfg.SSH.HostKeys,
 		MaxSessions:       cfg.SSH.MaxSessions,
@@ -95,6 +98,9 @@ func main() {
 		Token:             cfg.Agent.Token,
 		TrustedUserCAKeys: cfg.SSH.TrustedUserCAKeys,
 	})
+
+	// Create gRPC server
+	grpcServer := grpc.NewServer(cfg.GRPC.Port, cfg.Agent.Token)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -110,16 +116,25 @@ func main() {
 		}
 	}()
 
-	// Start gRPC server for command execution in a goroutine
-	// (must start before SSH server since SSH server blocks in Accept())
-	grpcServer := grpc.NewServer(cfg.GRPC.Port, cfg.Agent.Token)
-	if err := grpcServer.Start(ctx); err != nil {
-		log.Fatalf("Failed to start gRPC server: %v", err)
-	}
+	// Create multiplex server with SSH and gRPC handlers
+	multiplexAddr := fmt.Sprintf(":%d", cfg.Multiplex.Port)
+	multiplexServer := multiplex.New(
+		multiplexAddr,
+		// SSH handler
+		func(listener net.Listener) error {
+			return sshServer.StartWithListener(ctx, listener)
+		},
+		// gRPC handler
+		func(listener net.Listener) error {
+			return grpcServer.StartWithListener(ctx, listener)
+		},
+	)
 
-	// Start SSH server (this blocks forever accepting connections)
-	if err := server.Start(ctx); err != nil {
-		log.Fatalf("Failed to start SSH server: %v", err)
+	log.Printf("Starting multiplexed server on port %d (SSH + gRPC)", cfg.Multiplex.Port)
+
+	// Start multiplexed server (this blocks forever)
+	if err := multiplexServer.Start(); err != nil {
+		log.Fatalf("Failed to start multiplexed server: %v", err)
 	}
 
 	// Handle shutdown signals
@@ -129,7 +144,7 @@ func main() {
 
 	cancel()
 	log.Println("Shutting down...")
-	server.Stop()
+	sshServer.Stop()
 }
 
 func getHostname() string {

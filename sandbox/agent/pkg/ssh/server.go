@@ -233,6 +233,41 @@ func (s *SSHServer) Start(ctx context.Context) error {
 	}
 }
 
+// StartWithListener starts the SSH server with a provided listener (for cmux)
+func (s *SSHServer) StartWithListener(ctx context.Context, listener net.Listener) error {
+	s.mu.Lock()
+	if s.running {
+		s.mu.Unlock()
+		return fmt.Errorf("server already running")
+	}
+	s.running = true
+	s.mu.Unlock()
+
+	s.mu.Lock()
+	s.listeners = append(s.listeners, listener)
+	s.mu.Unlock()
+
+	log.Printf("SSH Server listening on %s", listener.Addr().String())
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.Stop()
+			return ctx.Err()
+		default:
+			conn, err := listener.Accept()
+			if err != nil {
+				if s.isShuttingDown() {
+					return nil
+				}
+				log.Printf("Failed to accept connection: %v", err)
+				continue
+			}
+			go s.handleConnection(conn)
+		}
+	}
+}
+
 func (s *SSHServer) isShuttingDown() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

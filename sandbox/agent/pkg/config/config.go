@@ -11,16 +11,17 @@ import (
 
 // Config represents the Agent configuration
 type Config struct {
-	Agent AgentConfig
-	SSH   SSHConfig
-	GRPC  GRPCConfig
+	Agent     AgentConfig
+	SSH       SSHConfig
+	GRPC      GRPCConfig
+	Multiplex MultiplexConfig
 }
 
 // AgentConfig holds Agent connection settings
 type AgentConfig struct {
-	Token       string
-	ServerURL   string
-	SandboxID   string
+	Token     string
+	ServerURL string
+	SandboxID string
 }
 
 // SSHConfig holds SSH server settings
@@ -34,6 +35,11 @@ type SSHConfig struct {
 
 // GRPCConfig holds gRPC server settings
 type GRPCConfig struct {
+	Port int
+}
+
+// MultiplexConfig holds the multiplexed port settings (SSH + gRPC on single port)
+type MultiplexConfig struct {
 	Port int
 }
 
@@ -52,6 +58,9 @@ func Load() (*Config, error) {
 		},
 		GRPC: GRPCConfig{
 			Port: getEnvIntOrDefault("AGENT_GRPC_PORT", 50052),
+		},
+		Multiplex: MultiplexConfig{
+			Port: getEnvIntOrDefault("AGENT_PORT", 22),
 		},
 	}, nil
 }
@@ -92,6 +101,9 @@ func LoadFromEnv() *Config {
 		},
 		GRPC: GRPCConfig{
 			Port: getEnvIntOrDefault("AGENT_GRPC_PORT", 50052),
+		},
+		Multiplex: MultiplexConfig{
+			Port: getEnvIntOrDefault("AGENT_PORT", 22),
 		},
 	}
 }
@@ -145,6 +157,9 @@ func (c *Config) Validate() error {
 	}
 	if c.GRPC.Port <= 0 {
 		return fmt.Errorf("gRPC port must be positive")
+	}
+	if c.Multiplex.Port <= 0 {
+		return fmt.Errorf("multiplex port must be positive")
 	}
 	return nil
 }

@@ -44,6 +44,16 @@ func (s *Server) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to create listener: %w", err)
 	}
 
+	return s.serve(ctx, lis)
+}
+
+// StartWithListener starts the gRPC server with a provided listener (for cmux)
+func (s *Server) StartWithListener(ctx context.Context, lis net.Listener) error {
+	return s.serve(ctx, lis)
+}
+
+// serve starts the gRPC server with the given listener
+func (s *Server) serve(ctx context.Context, lis net.Listener) error {
 	// Configure gRPC server with keepalive
 	grpcServer := grpc.NewServer(
 		grpc.KeepaliveParams(keepalive.ServerParameters{
@@ -55,7 +65,7 @@ func (s *Server) Start(ctx context.Context) error {
 
 	pb.RegisterExecServiceServer(grpcServer, s)
 
-	log.Printf("gRPC server listening on %s", addr)
+	log.Printf("gRPC server listening on %s", lis.Addr().String())
 
 	go func() {
 		if err := grpcServer.Serve(lis); err != nil && ctx.Err() == nil {
