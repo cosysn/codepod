@@ -23,8 +23,7 @@ type Sandbox struct {
 	ContainerID string
 	Image       string
 	Status      SandboxStatus
-	Port        int  // SSH port mapped to host
-	AgentPort   int  // Agent gRPC port mapped to host
+	Port        int  // SSH port mapped to host (unified port for SSH and gRPC)
 	CreatedAt   time.Time
 	StartedAt   time.Time
 	Config      *Config
@@ -219,7 +218,6 @@ func (m *Manager) Start(ctx context.Context, sb *Sandbox) error {
 	if networkMode == "host" {
 		// In host network mode, use the container port directly
 		sb.Port = 2222
-		sb.AgentPort = 50052
 	} else {
 		// Query Docker for the actual port mappings
 		containerInfo, err := m.docker.ListContainers(ctx, false)
@@ -229,9 +227,6 @@ func (m *Manager) Start(ctx context.Context, sb *Sandbox) error {
 					for _, p := range c.Ports {
 						if p.ContainerPort == 2222 && p.Protocol == "tcp" {
 							sb.Port = p.HostPort
-						}
-						if p.ContainerPort == 50052 && p.Protocol == "tcp" {
-							sb.AgentPort = p.HostPort
 						}
 					}
 					break
@@ -295,15 +290,11 @@ func (m *Manager) List(ctx context.Context) ([]*Sandbox, error) {
 	for _, c := range containers {
 		// Only include containers with our label
 		if _, ok := c.Labels["codepod.sandbox"]; ok {
-			// Extract SSH port (2222) and Agent gRPC port (50052) from port bindings
+			// Extract SSH port (2222) from port bindings
 			port := 0
-			agentPort := 0
 			for _, p := range c.Ports {
 				if p.ContainerPort == 2222 && p.Protocol == "tcp" {
 					port = p.HostPort
-				}
-				if p.ContainerPort == 50052 && p.Protocol == "tcp" {
-					agentPort = p.HostPort
 				}
 			}
 
@@ -314,7 +305,6 @@ func (m *Manager) List(ctx context.Context) ([]*Sandbox, error) {
 				Image:       c.Image,
 				Status:      SandboxStatus(c.State),
 				Port:        port,
-				AgentPort:   agentPort,
 			}
 			sandboxes = append(sandboxes, sb)
 		}
@@ -332,15 +322,11 @@ func (m *Manager) Get(ctx context.Context, id string) (*Sandbox, error) {
 
 	for _, c := range containers {
 		if c.ID == id {
-			// Extract SSH port (2222) and Agent gRPC port (50052) from port bindings
+			// Extract SSH port (2222) from port bindings
 			port := 0
-			agentPort := 0
 			for _, p := range c.Ports {
 				if p.ContainerPort == 2222 && p.Protocol == "tcp" {
 					port = p.HostPort
-				}
-				if p.ContainerPort == 50052 && p.Protocol == "tcp" {
-					agentPort = p.HostPort
 				}
 			}
 
@@ -351,7 +337,6 @@ func (m *Manager) Get(ctx context.Context, id string) (*Sandbox, error) {
 				Image:       c.Image,
 				Status:      SandboxStatus(c.State),
 				Port:        port,
-				AgentPort:   agentPort,
 			}, nil
 		}
 	}
@@ -373,15 +358,11 @@ func (m *Manager) GetByName(ctx context.Context, name string) (*Sandbox, error) 
 				n = n[1:]
 			}
 			if n == name {
-				// Extract SSH port (2222) and Agent gRPC port (50052) from port bindings
+				// Extract SSH port (2222) from port bindings
 				port := 0
-				agentPort := 0
 				for _, p := range c.Ports {
 					if p.ContainerPort == 2222 && p.Protocol == "tcp" {
 						port = p.HostPort
-					}
-					if p.ContainerPort == 50052 && p.Protocol == "tcp" {
-						agentPort = p.HostPort
 					}
 				}
 
@@ -392,7 +373,6 @@ func (m *Manager) GetByName(ctx context.Context, name string) (*Sandbox, error) 
 					Image:       c.Image,
 					Status:      SandboxStatus(c.State),
 					Port:        port,
-					AgentPort:   agentPort,
 				}, nil
 			}
 		}
