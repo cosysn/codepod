@@ -47,3 +47,6 @@ apps/devpod/envbuilder/envbuilder
 
 # Misc
 .cache
+
+# Worktrees
+.worktrees/
