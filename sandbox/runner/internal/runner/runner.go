@@ -285,6 +285,16 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 	// Mount Docker socket for builder images (needed for docker build/push)
 	mountDockerSocket := strings.Contains(job.Image, "/builder") || strings.Contains(job.Image, "/workspace/")
 
+	// Convert job volumes to sandbox volumes
+	volumes := make([]sandbox.VolumeInfo, len(job.Volumes))
+	for i, v := range job.Volumes {
+		volumes[i] = sandbox.VolumeInfo{
+			VolumeID:  v.VolumeID,
+			MountPath: v.MountPath,
+			ReadOnly:  v.ReadOnly,
+		}
+	}
+
 	opts := &sandbox.CreateOptions{
 		Name:             job.SandboxID,
 		Image:            job.Image,
@@ -296,7 +306,7 @@ func (r *Runner) handleCreateJob(ctx context.Context, job *Job) error {
 		AgentToken:       agentToken,
 		AgentServerURL:   r.cfg.Server.URL,
 		MountDockerSocket: mountDockerSocket,
-		Volumes:          job.Volumes,
+		Volumes:          volumes,
 	}
 
 	// Create sandbox

@@ -30,6 +30,7 @@ type Job struct {
 type VolumeInfo struct {
 	VolumeID  string `json:"volumeId"`
 	MountPath string `json:"mountPath"`
+	ReadOnly  bool   `json:"readOnly"`
 }
 
 // GrpcClientConfig holds the configuration for the gRPC client

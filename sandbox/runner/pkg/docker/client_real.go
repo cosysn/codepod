@@ -13,6 +13,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
 	nat "github.com/docker/go-connections/nat"
 )
@@ -250,7 +251,7 @@ func (r *RealClient) RemoveNetwork(ctx context.Context, networkID string) error 
 // EnsureVolume creates a volume if it doesn't exist
 func (r *RealClient) EnsureVolume(ctx context.Context, name string) error {
 	// Check if volume exists
-	volumes, err := r.cli.VolumeList(ctx, name)
+	volumes, err := r.cli.VolumeList(ctx, volume.ListOptions{})
 	if err != nil {
 		// If listing fails, try to create anyway
 		log.Printf("Warning: failed to list volumes: %v, trying to create", err)
@@ -265,7 +266,7 @@ func (r *RealClient) EnsureVolume(ctx context.Context, name string) error {
 	}
 
 	// Volume doesn't exist, create it
-	_, err = r.cli.VolumeCreate(ctx, types.VolumeCreateRequest{
+	_, err = r.cli.VolumeCreate(ctx, volume.CreateOptions{
 		Name: name,
 	})
 	if err != nil {

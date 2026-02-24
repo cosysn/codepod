@@ -51,6 +51,13 @@ type Config struct {
 	Labels      map[string]string
 }
 
+// VolumeInfo represents a volume to mount
+type VolumeInfo struct {
+	VolumeID   string
+	MountPath  string
+	ReadOnly   bool
+}
+
 // CreateOptions holds options for creating a sandbox
 type CreateOptions struct {
 	Image           string
