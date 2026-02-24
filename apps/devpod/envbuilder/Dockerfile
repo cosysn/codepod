@@ -1,12 +1,12 @@
-# Runtime stage - based on ubuntu-builder which has Go, Node.js, Docker
-FROM localhost:5000/codepod/ubuntu-builder:latest
+# envbuilder runtime image - based on alpine for minimal size
+FROM alpine:3.19
 
-# Configure Docker registry mirror
-RUN mkdir -p /etc/docker && \
-    echo '{"registry-mirrors": ["https://registry.docker-cn.com","https://mirror.ccs.tencentyun.com"]}' > /etc/docker/daemon.json
-
-# Install openssh-client for git clone over SSH
-RUN apk add --no-cache openssh-client
+# Install required tools
+RUN apk add --no-cache \
+    openssh-client \
+    ca-certificates \
+    git \
+    curl
 
 # Copy kaniko (using Aliyun mirror for China network)
 COPY --from=registry.cn-hangzhou.aliyuncs.com/kaniko-project/executor:latest /kaniko /kaniko
@@ -14,14 +14,9 @@ COPY --from=registry.cn-hangzhou.aliyuncs.com/kaniko-project/executor:latest /ka
 # Copy pre-built envbuilder binary
 COPY envbuilder /usr/local/bin/envbuilder
 
-# Ensure envbuilder is executable
 RUN chmod +x /usr/local/bin/envbuilder
-
-# Configure Kaniko registry mirror for China network
-ENV KANIKO_REGISTRY_MIRROR="registry.docker-cn.com;mirror.ccs.tencentyun.com"
 
 WORKDIR /workspace
 
-# Default command is envbuilder, but users can override with "sh" for shell access
 ENTRYPOINT ["/usr/local/bin/envbuilder"]
 CMD ["--help"]

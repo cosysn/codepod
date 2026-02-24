@@ -45,11 +45,20 @@ func runBuild(cmd *cobra.Command, args []string) {
 
 	log.Printf("Parsed config: image=%s", getStringPtr(cfg.Image))
 
-	// 2. Pre-pull base image if registry mirror is configured (only for kaniko to use local image)
-	if registryMirror != "" && cfg.Image != nil && *cfg.Image != "" {
-		log.Printf("Pre-pulling base image using mirror: %s -> %s", *cfg.Image, registryMirror)
-		if err := builder.PrePullBaseImage(*cfg.Image, registryMirror); err != nil {
-			log.Printf("Warning: Failed to pre-pull base image: %v", err)
+	// 2. Always pre-pull base image so kaniko can use local image cache
+	// This avoids registry lookup issues where kaniko might incorrectly parse the image name
+	if cfg.Image != nil && *cfg.Image != "" {
+		log.Printf("Pre-pulling base image: %s", *cfg.Image)
+		// First try without mirror (for internal registries)
+		if err := builder.PrePullBaseImage(*cfg.Image, ""); err != nil {
+			log.Printf("Warning: Failed to pre-pull base image without mirror: %v", err)
+			// Try with mirror as fallback
+			if registryMirror != "" {
+				log.Printf("Trying with registry mirror: %s", registryMirror)
+				if err2 := builder.PrePullBaseImage(*cfg.Image, registryMirror); err2 != nil {
+					log.Printf("Warning: Failed to pre-pull base image with mirror: %v", err2)
+				}
+			}
 		} else {
 			log.Printf("Base image pulled successfully, kaniko will use local image")
 		}

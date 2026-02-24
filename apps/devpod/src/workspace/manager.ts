@@ -40,9 +40,9 @@ export class WorkspaceManager {
 
   constructor() {
     this.registry = configManager.getRegistry();
-    // TODO: Fix - use ubuntu temporarily until devcontainer image is rebuilt properly
-    // Use ubuntu-builder which has git and can install openssh-client for SSH git access
-    this.builderImage = `localhost:5000/codepod/ubuntu-builder:latest`;
+    // Use agent image (alpine:3.19 based) and install tools in buildImage
+    // This avoids depending on internal registry images
+    this.builderImage = process.env.CODEPOD_SANDBOX_IMAGE || 'codepod/agent:latest';
     this.imageResolver = new ImageResolver({
       preferCache: true,
       cacheRegistry: this.registry,
@@ -220,6 +220,11 @@ export class WorkspaceManager {
     }
 
     try {
+      // Install required tools in builder sandbox (alpine-based image)
+      console.log('Installing required tools...');
+      const installCmd = `apk add --no-cache git curl ca-certificates`;
+      await sandbox.commands.run(installCmd, { timeout: 60000 });
+
       // Clone repository - try HTTPS first, fall back to SSH if needed
       console.log('Cloning repository...');
       // Remove existing directory if present (for retry scenarios)
@@ -255,8 +260,8 @@ export class WorkspaceManager {
 
       console.log('Building image with docker...');
       // Use docker build instead of kaniko to avoid kaniko registry mirror bug
-      // Pre-pull base image first
-      const baseImage = '10.0.0.15:5000/codepod/devcontainer:v12';
+      // Pre-pull base image (external image)
+      const baseImage = 'node:20-alpine';
       const prePullCmd = `docker pull ${baseImage}`;
       await this.runCommandWithLogs(sandbox, prePullCmd);
 
