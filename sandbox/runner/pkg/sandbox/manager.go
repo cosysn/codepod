@@ -27,6 +27,7 @@ type Sandbox struct {
 	CreatedAt   time.Time
 	StartedAt   time.Time
 	Config      *Config
+	NetworkMode string // Network mode used by the sandbox
 }
 
 // SandboxStatus represents sandbox state
@@ -206,6 +207,7 @@ func (m *Manager) Create(ctx context.Context, opts *CreateOptions) (*Sandbox, er
 			Memory: memory,
 			CPU:    int64(opts.CPU),
 		},
+		NetworkMode: opts.NetworkMode,
 	}, nil
 }
 
@@ -219,10 +221,8 @@ func (m *Manager) Start(ctx context.Context, sb *Sandbox) error {
 	sb.StartedAt = time.Now()
 
 	// Determine SSH port based on network mode
-	// Check if using host network mode (sandbox directly uses host network)
-	// CODEPOD_DOCKER_NETWORK=host means sandbox uses host network
-	networkMode := os.Getenv("CODEPOD_DOCKER_NETWORK")
-	if networkMode == "host" {
+	// If using host network mode, use container port directly
+	if sb.NetworkMode == "host" {
 		// In host network mode, use the container port directly
 		sb.Port = 2222
 	} else {
