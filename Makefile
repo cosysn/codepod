@@ -12,8 +12,8 @@ SERVER_DIR := sandbox/server
 CLI_DIR := sandbox/cli
 DOCKER_DIR := docker
 
-# Version from Git tag
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev")
+# Version from Git tag or environment variable
+VERSION := $(or $(VERSION),$(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev"))
 RELEASE_DIR := releases/$(VERSION)
 
 # Default target
@@ -259,23 +259,23 @@ release: ensure-release-dir build
 	@echo "Creating release packages for $(VERSION)..."
 	@# Package each component (Linux amd64)
 	@if [ -d "$(BUILD_DIR)/cli" ]; then \
-		cd $(BUILD_DIR)/cli && tar -czf ../../../$(RELEASE_DIR)/codepod-cli-$(VERSION)-linux-amd64.tar.gz .; \
+		cd $(BUILD_DIR)/cli && tar -czf $(CURDIR)/$(RELEASE_DIR)/codepod-cli-$(VERSION)-linux-amd64.tar.gz .; \
 	fi
 	@if [ -d "$(BUILD_DIR)/server" ]; then \
-		cd $(BUILD_DIR)/server && tar -czf ../../../$(RELEASE_DIR)/codepod-server-$(VERSION)-linux-amd64.tar.gz .; \
+		cd $(BUILD_DIR)/server && tar -czf $(CURDIR)/$(RELEASE_DIR)/codepod-server-$(VERSION)-linux-amd64.tar.gz .; \
 	fi
 	@if [ -f "$(BUILD_DIR)/agent" ]; then \
-		cd $(BUILD_DIR) && tar -czf $(RELEASE_DIR)/codepod-agent-$(VERSION)-linux-amd64.tar.gz agent; \
+		cd $(BUILD_DIR) && tar -czf $(CURDIR)/$(RELEASE_DIR)/codepod-agent-$(VERSION)-linux-amd64.tar.gz agent; \
 	fi
 	@if [ -f "$(BUILD_DIR)/runner" ]; then \
-		cd $(BUILD_DIR) && tar -czf $(RELEASE_DIR)/codepod-runner-$(VERSION)-linux-amd64.tar.gz runner; \
+		cd $(BUILD_DIR) && tar -czf $(CURDIR)/$(RELEASE_DIR)/codepod-runner-$(VERSION)-linux-amd64.tar.gz runner; \
 	fi
 	@# Copy install scripts
 	@if [ -f "scripts/install.sh" ]; then \
-		cp scripts/install.sh $(RELEASE_DIR)/; \
+		cp scripts/install.sh $(CURDIR)/$(RELEASE_DIR)/; \
 	fi
 	@if [ -f "scripts/install.bat" ]; then \
-		cp scripts/install.bat $(RELEASE_DIR)/; \
+		cp scripts/install.bat $(CURDIR)/$(RELEASE_DIR)/; \
 	fi
 	@echo ""
 	@echo "Release created: $(RELEASE_DIR)/"
