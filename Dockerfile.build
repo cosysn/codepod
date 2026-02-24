@@ -1,0 +1,27 @@
+FROM docker.io/library/golang:1.26-bookworm
+
+# Configure Go modules to use Alibaba Cloud mirror
+RUN go env -w GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
+
+# Install Node.js
+RUN apt-get update && apt-get install -y curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Git
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace
+
+# Copy project
+COPY . .
+
+# Install Go dependencies
+RUN go work sync
+
+# Install Node.js dependencies for CLI and Server
+RUN cd sandbox/cli && npm install
+RUN cd sandbox/server && npm install
+
+CMD ["/bin/bash"]

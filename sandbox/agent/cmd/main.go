@@ -7,6 +7,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -22,6 +23,9 @@ import (
 	"github.com/codepod/codepod/sandbox/agent/pkg/ssh"
 	sshc "golang.org/x/crypto/ssh"
 )
+
+// Version is set at build time via ldflags
+var Version = "v0.0.0-dev"
 
 // generateSSHHostKeys generates SSH host keys using Go crypto library
 func generateSSHHostKeys() error {
@@ -65,6 +69,15 @@ func generateSSHHostKeys() error {
 }
 
 func main() {
+	flag.Bool("version", false, "Show version")
+	flag.Bool("v", false, "Show version (shorthand)")
+	flag.Parse()
+
+	if flag.Lookup("version").Value.String() == "true" || flag.Lookup("v").Value.String() == "true" {
+		fmt.Println(Version)
+		os.Exit(0)
+	}
+
 	log.Println("Starting CodePod Agent...")
 
 	// Generate SSH host keys if needed
