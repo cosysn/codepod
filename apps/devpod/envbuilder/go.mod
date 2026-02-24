@@ -1,6 +1,6 @@
 module github.com/codepod/devpod/envbuilder
 
-go 1.25
+go 1.26
 
 require (
 	github.com/GoogleContainerTools/kaniko v1.23.2
