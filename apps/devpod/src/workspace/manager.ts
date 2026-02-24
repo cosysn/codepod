@@ -41,7 +41,8 @@ export class WorkspaceManager {
   constructor() {
     this.registry = configManager.getRegistry();
     // TODO: Fix - use ubuntu temporarily until devcontainer image is rebuilt properly
-    this.builderImage = `10.0.0.15:5000/codepod/devcontainer:v12`;
+    // Use ubuntu-builder which has git and can install openssh-client for SSH git access
+    this.builderImage = `localhost:5000/codepod/ubuntu-builder:latest`;
     this.imageResolver = new ImageResolver({
       preferCache: true,
       cacheRegistry: this.registry,
@@ -224,14 +225,19 @@ export class WorkspaceManager {
       // Remove existing directory if present (for retry scenarios)
       let cloneCmd = `rm -rf /workspace/repo && git clone -q --depth 1 ${options.repoUrl} /workspace/repo 2>&1`;
 
-      // Check if we should use SSH (if HTTPS fails, user can provide SSH URL)
+      // Handle different Git URL formats
+      // SSH format: git@github.com:user/repo.git -> convert to HTTPS
+      // HTTPS format: https://github.com/user/repo.git -> use as-is
+      // SSH with ssh://: ssh://git@github.com/user/repo.git -> convert to HTTPS
       let repoUrl = options.repoUrl;
-      if (options.repoUrl.includes('git@')) {
-        // Convert SSH URL to HTTPS for better compatibility
-        // e.g., git@gitee.com:cosysn/codepod.git -> https://gitee.com/cosysn/codepod.git
+      if (options.repoUrl.includes('git@') && !options.repoUrl.includes('ssh://')) {
+        // Convert SSH URL to HTTPS
+        // git@gitee.com:cosysn/codepod.git -> https://gitee.com/cosysn/codepod.git
         repoUrl = 'https://' + options.repoUrl.replace('git@', '').replace(':', '/');
+        console.log('Converting SSH URL to HTTPS for git clone');
       } else if (options.repoUrl.includes('ssh://')) {
-        repoUrl = options.repoUrl.replace('ssh://', 'https://');
+        // Convert ssh:// URLs to HTTPS
+        repoUrl = options.repoUrl.replace('ssh://git@', 'https://').replace('ssh://', 'https://');
       }
       cloneCmd = `rm -rf /workspace/repo && git clone -q --depth 1 ${repoUrl} /workspace/repo 2>&1`;
       await this.runCommandWithLogs(sandbox, cloneCmd);
@@ -247,9 +253,20 @@ export class WorkspaceManager {
       const imageName = `workspace/${options.name}:latest`;
       const fullImageName = `${containerRegistry}/${imageName}`;
 
-      console.log('Building image with envbuilder...');
-      const buildCmd = `envbuilder build --workspace /workspace/repo --image ${fullImageName} --registry ${containerRegistry}`;
+      console.log('Building image with docker...');
+      // Use docker build instead of kaniko to avoid kaniko registry mirror bug
+      // Pre-pull base image first
+      const baseImage = '10.0.0.15:5000/codepod/devcontainer:v12';
+      const prePullCmd = `docker pull ${baseImage}`;
+      await this.runCommandWithLogs(sandbox, prePullCmd);
+
+      // Build with docker
+      const buildCmd = `cd /workspace/repo && docker build -t ${fullImageName} -f .devcontainer/Dockerfile .`;
       await this.runCommandWithLogs(sandbox, buildCmd, { cwd: '/workspace' });
+
+      // Push to registry
+      const pushCmd = `docker push ${fullImageName}`;
+      await this.runCommandWithLogs(sandbox, pushCmd);
 
       console.log('Image built successfully!');
 
