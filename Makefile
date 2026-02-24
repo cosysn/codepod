@@ -14,7 +14,7 @@ DOCKER_DIR := docker
 
 # Version from Git tag or environment variable
 VERSION := $(or $(VERSION),$(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev"))
-RELEASE_DIR := releases/$(VERSION)
+RELEASE_DIR := $(CURDIR)/releases/$(VERSION)
 
 # Default target
 all: help
@@ -109,6 +109,10 @@ build-cli:
 	cp -r $(CLI_DIR)/dist/* $(BUILD_DIR)/cli/
 	cp -r $(CLI_DIR)/node_modules $(BUILD_DIR)/cli/
 	cp $(CLI_DIR)/package.json $(BUILD_DIR)/cli/
+	# Create bin directory and symlink for executable
+	mkdir -p $(BUILD_DIR)/cli/bin
+	ln -sf ../index.js $(BUILD_DIR)/cli/bin/codepod
+	chmod +x $(BUILD_DIR)/cli/index.js
 	@echo "CLI built: $(BUILD_DIR)/cli"
 
 # Build all available components
@@ -253,29 +257,44 @@ version:
 
 # Release targets
 ensure-release-dir:
-	mkdir -p $(RELEASE_DIR)
+	@mkdir -p $(RELEASE_DIR)
 
 release: ensure-release-dir build
 	@echo "Creating release packages for $(VERSION)..."
-	@# Package each component (Linux amd64)
+	@# Package CLI - create proper structure with bin/
 	@if [ -d "$(BUILD_DIR)/cli" ]; then \
-		cd $(BUILD_DIR)/cli && tar -czf $(CURDIR)/$(RELEASE_DIR)/codepod-cli-$(VERSION)-linux-amd64.tar.gz .; \
+		mkdir -p $(RELEASE_DIR)/tmp-cli && \
+		cp -r $(BUILD_DIR)/cli/* $(RELEASE_DIR)/tmp-cli/ && \
+		mkdir -p $(RELEASE_DIR)/tmp-cli/bin && \
+		ln -sf ../index.js $(RELEASE_DIR)/tmp-cli/bin/codepod && \
+		chmod +x $(RELEASE_DIR)/tmp-cli/index.js && \
+		cd $(RELEASE_DIR)/tmp-cli && tar -czf $(RELEASE_DIR)/codepod-cli-$(VERSION)-linux-amd64.tar.gz . && \
+		rm -rf $(RELEASE_DIR)/tmp-cli; \
 	fi
+	@# Package Server - create proper structure with bin/
 	@if [ -d "$(BUILD_DIR)/server" ]; then \
-		cd $(BUILD_DIR)/server && tar -czf $(CURDIR)/$(RELEASE_DIR)/codepod-server-$(VERSION)-linux-amd64.tar.gz .; \
+		mkdir -p $(RELEASE_DIR)/tmp-server && \
+		cp -r $(BUILD_DIR)/server/* $(RELEASE_DIR)/tmp-server/ && \
+		mkdir -p $(RELEASE_DIR)/tmp-server/bin && \
+		ln -sf ../server.js $(RELEASE_DIR)/tmp-server/bin/codepod-server && \
+		chmod +x $(RELEASE_DIR)/tmp-server/server.js && \
+		cd $(RELEASE_DIR)/tmp-server && tar -czf $(RELEASE_DIR)/codepod-server-$(VERSION)-linux-amd64.tar.gz . && \
+		rm -rf $(RELEASE_DIR)/tmp-server; \
 	fi
+	@# Package Agent
 	@if [ -f "$(BUILD_DIR)/agent" ]; then \
-		cd $(BUILD_DIR) && tar -czf $(CURDIR)/$(RELEASE_DIR)/codepod-agent-$(VERSION)-linux-amd64.tar.gz agent; \
+		cd $(BUILD_DIR) && tar -czf $(RELEASE_DIR)/codepod-agent-$(VERSION)-linux-amd64.tar.gz agent; \
 	fi
+	@# Package Runner
 	@if [ -f "$(BUILD_DIR)/runner" ]; then \
-		cd $(BUILD_DIR) && tar -czf $(CURDIR)/$(RELEASE_DIR)/codepod-runner-$(VERSION)-linux-amd64.tar.gz runner; \
+		cd $(BUILD_DIR) && tar -czf $(RELEASE_DIR)/codepod-runner-$(VERSION)-linux-amd64.tar.gz runner; \
 	fi
 	@# Copy install scripts
 	@if [ -f "scripts/install.sh" ]; then \
-		cp scripts/install.sh $(CURDIR)/$(RELEASE_DIR)/; \
+		cp scripts/install.sh $(RELEASE_DIR)/; \
 	fi
 	@if [ -f "scripts/install.bat" ]; then \
-		cp scripts/install.bat $(CURDIR)/$(RELEASE_DIR)/; \
+		cp scripts/install.bat $(RELEASE_DIR)/; \
 	fi
 	@echo ""
 	@echo "Release created: $(RELEASE_DIR)/"
