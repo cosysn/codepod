@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -10,7 +11,19 @@ import (
 	"github.com/codepod/codepod/sandbox/runner/internal/runner"
 )
 
+// Version is set at build time via ldflags
+var Version = "v0.0.0-dev"
+
 func main() {
+	flag.Bool("version", false, "Show version")
+	flag.Bool("v", false, "Show version (shorthand)")
+	flag.Parse()
+
+	if flag.Lookup("version").Value.String() == "true" || flag.Lookup("v").Value.String() == "true" {
+		fmt.Println(Version)
+		os.Exit(0)
+	}
+
 	log.Println("Starting CodePod Runner...")
 
 	r, err := runner.New()
