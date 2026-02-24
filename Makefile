@@ -296,6 +296,48 @@ release: ensure-release-dir build
 	@if [ -f "scripts/install.bat" ]; then \
 		cp scripts/install.bat $(RELEASE_DIR)/; \
 	fi
+	@# Export Docker images
+	@if [ -d "$(BUILD_DIR)/cli" ] || [ -d "$(BUILD_DIR)/server" ]; then \
+		echo "Exporting Docker images..."; \
+		mkdir -p $(RELEASE_DIR)/docker; \
+	fi
+	@docker images -q codepod/server:$(VERSION) > /dev/null 2>&1 && \
+		docker save -o $(RELEASE_DIR)/docker/codepod-server-$(VERSION).tar codepod/server:$(VERSION) || true
+	@docker images -q codepod/runner:$(VERSION) > /dev/null 2>&1 && \
+		docker save -o $(RELEASE_DIR)/docker/codepod-runner-$(VERSION).tar codepod/runner:$(VERSION) || true
 	@echo ""
 	@echo "Release created: $(RELEASE_DIR)/"
 	@ls -la $(RELEASE_DIR)/
+
+# Docker image build targets
+DOCKER_REGISTRY ?= codepod
+DOCKER_TAG ?= $(VERSION)
+
+build-docker-server:
+	@echo "Building Docker image for Server..."
+	cd $(SERVER_DIR) && docker build -t $(DOCKER_REGISTRY)/server:$(DOCKER_TAG) .
+	@echo "Server image built: $(DOCKER_REGISTRY)/server:$(DOCKER_TAG)"
+
+build-docker-runner:
+	@echo "Building Docker image for Runner (using pre-built binaries)..."
+	docker build -t $(DOCKER_REGISTRY)/runner:$(DOCKER_TAG) -f Dockerfile.runner .
+	@echo "Runner image built: $(DOCKER_REGISTRY)/runner:$(DOCKER_TAG)"
+
+build-docker: build-docker-server build-docker-runner
+	@echo "Docker images built successfully"
+
+# Export Docker images to release directory
+export-docker: build-docker
+	@echo "Exporting Docker images to release..."
+	@mkdir -p $(RELEASE_DIR)/docker
+	@docker save -o $(RELEASE_DIR)/docker/codepod-server-$(DOCKER_TAG).tar $(DOCKER_REGISTRY)/server:$(DOCKER_TAG)
+	@docker save -o $(RELEASE_DIR)/docker/codepod-runner-$(DOCKER_TAG).tar $(DOCKER_REGISTRY)/runner:$(DOCKER_TAG)
+	@echo "Docker images exported to $(RELEASE_DIR)/docker/"
+	@ls -la $(RELEASE_DIR)/docker/
+
+# Load Docker images from release (for testing)
+load-docker:
+	@echo "Loading Docker images from release..."
+	@docker load -i $(RELEASE_DIR)/docker/codepod-server-$(DOCKER_TAG).tar
+	@docker load -i $(RELEASE_DIR)/docker/codepod-runner-$(DOCKER_TAG).tar
+	@echo "Docker images loaded"
