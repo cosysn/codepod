@@ -12,6 +12,10 @@ SERVER_DIR := sandbox/server
 CLI_DIR := sandbox/cli
 DOCKER_DIR := docker
 
+# Version from Git tag
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "v0.0.0-dev")
+RELEASE_DIR := releases/$(VERSION)
+
 # Default target
 all: help
 	@echo "Use 'make help' to see available targets"
@@ -51,10 +55,10 @@ build-sdk: ensure-build-dir
 
 # Build Runner (Go) - requires cmd/main.go
 build-runner:
-	@echo "Building Runner..."
+	@echo "Building Runner (version $(VERSION))..."
 	@if [ -f $(RUNNER_DIR)/cmd/main.go ]; then \
 		mkdir -p $(BUILD_DIR); \
-		go build -o $(BUILD_DIR)/runner $(RUNNER_DIR)/cmd; \
+		go build -buildvcs=false -ldflags "-X main.Version=$(VERSION)" -o $(BUILD_DIR)/runner $(RUNNER_DIR)/cmd; \
 		echo "Runner built: $(BUILD_DIR)/runner"; \
 	else \
 		echo "Runner entry point not found: $(RUNNER_DIR)/cmd/main.go"; \
@@ -69,20 +73,20 @@ build-agent: build-agent-amd64 build-agent-arm64
 	@ls -la $(CURDIR)/$(BUILD_DIR)/agent* 2>/dev/null || echo "No agent binaries found"
 
 build-agent-amd64:
-	@echo "Building agent for linux/amd64..."
+	@echo "Building agent for linux/amd64 (version $(VERSION))..."
 	@if [ -f $(AGENT_DIR)/cmd/main.go ]; then \
 		mkdir -p $(BUILD_DIR); \
-		cd $(AGENT_DIR) && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o ../../$(BUILD_DIR)/agent ./cmd && echo "Agent built: $(CURDIR)/$(BUILD_DIR)/agent" || echo "Agent build failed"; \
+		cd $(AGENT_DIR) && GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -buildvcs=false -ldflags "-X main.Version=$(VERSION)" -o ../../$(BUILD_DIR)/agent ./cmd && echo "Agent built: $(CURDIR)/$(BUILD_DIR)/agent" || echo "Agent build failed"; \
 	else \
 		echo "Agent entry point not found: $(AGENT_DIR)/cmd/main.go"; \
 		echo "Skipping Agent build."; \
 	fi
 
 build-agent-arm64:
-	@echo "Building agent for linux/arm64..."
+	@echo "Building agent for linux/arm64 (version $(VERSION))..."
 	@if [ -f $(AGENT_DIR)/cmd/main.go ]; then \
 		mkdir -p $(BUILD_DIR); \
-		cd $(AGENT_DIR) && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o ../../$(BUILD_DIR)/agent-arm64 ./cmd && echo "Agent built: $(CURDIR)/$(BUILD_DIR)/agent-arm64" || echo "Agent build failed"; \
+		cd $(AGENT_DIR) && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -buildvcs=false -ldflags "-X main.Version=$(VERSION)" -o ../../$(BUILD_DIR)/agent-arm64 ./cmd && echo "Agent built: $(CURDIR)/$(BUILD_DIR)/agent-arm64" || echo "Agent build failed"; \
 	else \
 		echo "Agent entry point not found: $(AGENT_DIR)/cmd/main.go"; \
 		echo "Skipping Agent build."; \
@@ -242,3 +246,37 @@ clean-devpod:
 	@echo "Cleaning DevPod..."
 	rm -rf apps/devpod/dist
 	rm -rf apps/devpod/node_modules
+
+# Version display
+version:
+	@echo $(VERSION)
+
+# Release targets
+ensure-release-dir:
+	mkdir -p $(RELEASE_DIR)
+
+release: ensure-release-dir build
+	@echo "Creating release packages for $(VERSION)..."
+	@# Package each component (Linux amd64)
+	@if [ -d "$(BUILD_DIR)/cli" ]; then \
+		cd $(BUILD_DIR)/cli && tar -czf ../../../$(RELEASE_DIR)/codepod-cli-$(VERSION)-linux-amd64.tar.gz .; \
+	fi
+	@if [ -d "$(BUILD_DIR)/server" ]; then \
+		cd $(BUILD_DIR)/server && tar -czf ../../../$(RELEASE_DIR)/codepod-server-$(VERSION)-linux-amd64.tar.gz .; \
+	fi
+	@if [ -f "$(BUILD_DIR)/agent" ]; then \
+		cd $(BUILD_DIR) && tar -czf $(RELEASE_DIR)/codepod-agent-$(VERSION)-linux-amd64.tar.gz agent; \
+	fi
+	@if [ -f "$(BUILD_DIR)/runner" ]; then \
+		cd $(BUILD_DIR) && tar -czf $(RELEASE_DIR)/codepod-runner-$(VERSION)-linux-amd64.tar.gz runner; \
+	fi
+	@# Copy install scripts
+	@if [ -f "scripts/install.sh" ]; then \
+		cp scripts/install.sh $(RELEASE_DIR)/; \
+	fi
+	@if [ -f "scripts/install.bat" ]; then \
+		cp scripts/install.bat $(RELEASE_DIR)/; \
+	fi
+	@echo ""
+	@echo "Release created: $(RELEASE_DIR)/"
+	@ls -la $(RELEASE_DIR)/
