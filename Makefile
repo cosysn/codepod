@@ -296,15 +296,17 @@ release: ensure-release-dir build
 	@if [ -f "scripts/install.bat" ]; then \
 		cp scripts/install.bat $(RELEASE_DIR)/; \
 	fi
-	@# Export Docker images
+	@# Build and export Docker images (use short version for tags)
 	@if [ -d "$(BUILD_DIR)/cli" ] || [ -d "$(BUILD_DIR)/server" ]; then \
-		echo "Exporting Docker images..."; \
+		echo "Building and exporting Docker images..."; \
 		mkdir -p $(RELEASE_DIR)/docker; \
+		DOCKER_TAG=$(shell echo $(VERSION) | cut -d'-' -f1); \
+		echo "Using Docker tag: $$DOCKER_TAG"; \
+		cd $(SERVER_DIR) && docker build -t codepod/server:$$DOCKER_TAG .; \
+		docker save -o $(RELEASE_DIR)/docker/codepod-server-$$DOCKER_TAG.tar codepod/server:$$DOCKER_TAG; \
+		cd $(CURDIR) && docker build -t codepod/runner:$$DOCKER_TAG -f $(CURDIR)/Dockerfile.runner .; \
+		docker save -o $(RELEASE_DIR)/docker/codepod-runner-$$DOCKER_TAG.tar codepod/runner:$$DOCKER_TAG; \
 	fi
-	@docker images -q codepod/server:$(VERSION) > /dev/null 2>&1 && \
-		docker save -o $(RELEASE_DIR)/docker/codepod-server-$(VERSION).tar codepod/server:$(VERSION) || true
-	@docker images -q codepod/runner:$(VERSION) > /dev/null 2>&1 && \
-		docker save -o $(RELEASE_DIR)/docker/codepod-runner-$(VERSION).tar codepod/runner:$(VERSION) || true
 	@echo ""
 	@echo "Release created: $(RELEASE_DIR)/"
 	@ls -la $(RELEASE_DIR)/
