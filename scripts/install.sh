@@ -1,12 +1,84 @@
 #!/bin/bash
 set -e
 
-VERSION=${1:-""}
+# Handle uninstall flag
+UNINSTALL=false
+if [ "$1" = "uninstall" ] || [ "$1" = "--uninstall" ]; then
+    UNINSTALL=true
+    VERSION="${2:-""}"
+else
+    VERSION="${1:-""}"
+fi
+
 # Default install dir for binaries
 INSTALL_PREFIX=${INSTALL_PREFIX:-/usr/local}
 # Data and config dir
 DATA_DIR=${DATA_DIR:-$HOME/.codepod}
 IMPORT_DOCKER=${IMPORT_DOCKER:-true}
+
+# Determine if we need sudo
+if [ "$INSTALL_PREFIX" = "/usr/local" ] && [ ! -w "/usr/local/bin" ]; then
+    SUDO=sudo
+else
+    SUDO=
+fi
+
+# Uninstall
+if [ "$UNINSTALL" = "true" ]; then
+    echo "Uninstalling CodePod..."
+
+    # Remove binaries
+    echo "Removing binaries from $INSTALL_PREFIX/bin..."
+    $SUDO rm -f "$INSTALL_PREFIX/bin/codepod"
+    $SUDO rm -f "$INSTALL_PREFIX/bin/codepod-server"
+    $SUDO rm -f "$INSTALL_PREFIX/bin/codepod-agent"
+    $SUDO rm -f "$INSTALL_PREFIX/bin/codepod-runner"
+
+    # Remove libs
+    echo "Removing libraries from $INSTALL_PREFIX/lib..."
+    $SUDO rm -rf "$INSTALL_PREFIX/lib/codepod-cli"
+    $SUDO rm -rf "$INSTALL_PREFIX/lib/codepod-server"
+
+    # Ask about removing config
+    if [ -d "$DATA_DIR" ]; then
+        echo ""
+        read -p "Remove config and data directory ($DATA_DIR)? [y/N] " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            rm -rf "$DATA_DIR"
+            echo "  Removed $DATA_DIR"
+        else
+            echo "  Kept $DATA_DIR"
+        fi
+    fi
+
+    # Ask about removing Docker images
+    if command -v docker &> /dev/null; then
+        echo ""
+        read -p "Remove Docker images (codepod/server, codepod/runner)? [y/N] " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            docker rmi codepod/server:latest codepod/server:v0.0.3 2>/dev/null || true
+            docker rmi codepod/runner:latest codepod/runner:v0.0.3 2>/dev/null || true
+            echo "  Removed Docker images"
+        else
+            echo "  Kept Docker images"
+        fi
+    fi
+
+    # Remove from PATH in shell rc
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc"; do
+        if [ -f "$rc" ]; then
+            $SUDO sed -i "/export PATH=.*\/bin.*codepod/d" "$rc" 2>/dev/null || true
+            $SUDO sed -i "/export CODEPOD_HOME/d" "$rc" 2>/dev/null || true
+        fi
+    done
+
+    echo ""
+    echo "Uninstallation complete!"
+    echo "You may need to restart your terminal or run: source ~/.bashrc"
+    exit 0
+fi
 
 echo "Installing CodePod v$VERSION..."
 
