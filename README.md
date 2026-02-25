@@ -20,7 +20,122 @@
 - Node.js 20+
 - Docker Compose (可选)
 
+### 构建 Release
+
+```bash
+# 克隆项目
+git clone https://github.com/codepod/codepod.git
+cd codepod
+
+# 创建 git tag
+git tag v0.1.0
+git push origin v0.1.0
+
+# 构建 release（自动打包并构建 Docker 镜像）
+make release
+```
+
+构建产物位于 `releases/v0.1.0/` 目录：
+
+```
+releases/v0.1.0/
+├── codepod-cli-v0.1.0-linux-amd64.tar.gz     # CLI
+├── codepod-server-v0.1.0-linux-amd64.tar.gz # Server
+├── codepod-agent-v0.1.0-linux-amd64.tar.gz   # Agent
+├── codepod-runner-v0.1.0-linux-amd64.tar.gz  # Runner
+├── docker/
+│   ├── codepod-server-v0.1.0.tar            # Server Docker 镜像
+│   └── codepod-runner-v0.1.0.tar            # Runner Docker 镜像
+├── install.sh                                # Linux 安装脚本
+└── install.bat                               # Windows 安装脚本
+```
+
 ### 安装
+
+```bash
+# 解压 release 包
+cd releases/v0.1.0
+
+# 安装（需要 sudo）
+sudo ./install.sh v0.1.0
+```
+
+安装选项：
+
+```bash
+# 自定义安装路径
+INSTALL_PREFIX=/opt/codepod ./install.sh v0.1.0
+
+# 跳过 Docker 镜像导入
+IMPORT_DOCKER=false ./install.sh v0.1.0
+
+# 自定义数据目录
+DATA_DIR=/var/lib/codepod ./install.sh v0.1.0
+```
+
+安装目录结构：
+
+```
+/usr/local/bin/          # 可执行文件
+├── codepod              # CLI
+├── codepod-server       # Server 启动脚本
+├── codepod-agent        # Agent 二进制
+└── codepod-runner       # Runner 二进制
+
+/usr/local/lib/
+├── codepod-cli/         # CLI 库文件
+└── codepod-server/      # Server 库文件
+
+~/.codepod/
+└── config.yaml          # 配置文件
+```
+
+### 部署
+
+使用 Docker Compose 部署 Server 和 Runner：
+
+```bash
+# 加载 Docker 镜像
+docker load -i docker/codepod-server-v0.1.0.tar
+docker load -i docker/codepod-runner-v0.1.0.tar
+
+# 启动服务
+docker run -d \
+  --name codepod-server \
+  -p 8080:8080 \
+  -p 8443:8443 \
+  -e CODEPOD_REGISTRY_URL=http://registry:5000 \
+  codepod/server:v0.1.0
+
+docker run -d \
+  --name codepod-runner \
+  --privileged \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e CODEPOD_SERVER_URL=http://server:8080 \
+  codepod/runner:v0.1.0
+```
+
+### 卸载
+
+```bash
+# 卸载 CodePod
+sudo ./install.sh uninstall
+
+# 或者
+sudo ./install.sh --uninstall
+```
+
+卸载时会有交互提示询问是否删除配置文件和 Docker 镜像。
+
+## 开发模式
+
+### 前置要求
+
+- Docker 20.10+
+- Go 1.21+
+- Node.js 20+
+
+### 本地开发
 
 ```bash
 # 克隆项目
@@ -35,10 +150,10 @@ npm install
 make build
 
 # 运行 (开发模式)
-cd apps/server && npm run dev
+cd sandbox/server && npm run dev
 ```
 
-### 使用 Docker Compose
+### 使用 Docker Compose 开发
 
 ```bash
 cd docker
