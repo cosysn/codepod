@@ -21,8 +21,29 @@ fi
 
 echo "Installing CodePod v$VERSION..."
 
-# Extract components
-for pkg in codepod-cli-*.tar.gz codepod-server-*.tar.gz codepod-agent-*.tar.gz codepod-runner-*.tar.gz; do
+# Extract components to individual directories
+for pkg in codepod-cli-*.tar.gz; do
+    if [ -f "$pkg" ]; then
+        tar -xzf "$pkg" -C "$INSTALL_DIR"
+        echo "  Extracted: $pkg"
+    fi
+done
+
+for pkg in codepod-server-*.tar.gz; do
+    if [ -f "$pkg" ]; then
+        tar -xzf "$pkg" -C "$INSTALL_DIR"
+        echo "  Extracted: $pkg"
+    fi
+done
+
+for pkg in codepod-agent-*.tar.gz; do
+    if [ -f "$pkg" ]; then
+        tar -xzf "$pkg" -C "$INSTALL_DIR"
+        echo "  Extracted: $pkg"
+    fi
+done
+
+for pkg in codepod-runner-*.tar.gz; do
     if [ -f "$pkg" ]; then
         tar -xzf "$pkg" -C "$INSTALL_DIR"
         echo "  Extracted: $pkg"
@@ -48,9 +69,9 @@ if [ -n "$SHELL_RC" ]; then
 fi
 
 # Create CLI symlink
-if [ -f "$INSTALL_DIR/dist/index.js" ]; then
-    ln -sf "$INSTALL_DIR/dist/index.js" "$INSTALL_DIR/bin/codepod"
-    chmod +x "$INSTALL_DIR/dist/index.js"
+if [ -f "$INSTALL_DIR/codepod-cli/index.js" ]; then
+    ln -sf "$INSTALL_DIR/codepod-cli/index.js" "$INSTALL_DIR/bin/codepod"
+    chmod +x "$INSTALL_DIR/codepod-cli/index.js"
 fi
 
 # Import Docker images if available

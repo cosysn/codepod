@@ -261,24 +261,24 @@ ensure-release-dir:
 
 release: ensure-release-dir build
 	@echo "Creating release packages for $(VERSION)..."
-	@# Package CLI - create proper structure with bin/
+	@# Package CLI - create proper structure with codepod-cli/ subdir
 	@if [ -d "$(BUILD_DIR)/cli" ]; then \
-		mkdir -p $(RELEASE_DIR)/tmp-cli && \
-		cp -r $(BUILD_DIR)/cli/* $(RELEASE_DIR)/tmp-cli/ && \
-		mkdir -p $(RELEASE_DIR)/tmp-cli/bin && \
-		ln -sf ../index.js $(RELEASE_DIR)/tmp-cli/bin/codepod && \
-		chmod +x $(RELEASE_DIR)/tmp-cli/index.js && \
-		cd $(RELEASE_DIR)/tmp-cli && tar -czf $(RELEASE_DIR)/codepod-cli-$(VERSION)-linux-amd64.tar.gz . && \
+		mkdir -p $(RELEASE_DIR)/tmp-cli/codepod-cli && \
+		cp -r $(BUILD_DIR)/cli/* $(RELEASE_DIR)/tmp-cli/codepod-cli/ && \
+		mkdir -p $(RELEASE_DIR)/tmp-cli/codepod-cli/bin && \
+		ln -sf ../index.js $(RELEASE_DIR)/tmp-cli/codepod-cli/bin/codepod && \
+		chmod +x $(RELEASE_DIR)/tmp-cli/codepod-cli/index.js && \
+		cd $(RELEASE_DIR)/tmp-cli && tar -czf $(RELEASE_DIR)/codepod-cli-$(VERSION)-linux-amd64.tar.gz codepod-cli && \
 		rm -rf $(RELEASE_DIR)/tmp-cli; \
 	fi
-	@# Package Server - create proper structure with bin/
+	@# Package Server - create proper structure with codepod-server/ subdir
 	@if [ -d "$(BUILD_DIR)/server" ]; then \
-		mkdir -p $(RELEASE_DIR)/tmp-server && \
-		cp -r $(BUILD_DIR)/server/* $(RELEASE_DIR)/tmp-server/ && \
-		mkdir -p $(RELEASE_DIR)/tmp-server/bin && \
-		ln -sf ../server.js $(RELEASE_DIR)/tmp-server/bin/codepod-server && \
-		chmod +x $(RELEASE_DIR)/tmp-server/server.js && \
-		cd $(RELEASE_DIR)/tmp-server && tar -czf $(RELEASE_DIR)/codepod-server-$(VERSION)-linux-amd64.tar.gz . && \
+		mkdir -p $(RELEASE_DIR)/tmp-server/codepod-server && \
+		cp -r $(BUILD_DIR)/server/* $(RELEASE_DIR)/tmp-server/codepod-server/ && \
+		mkdir -p $(RELEASE_DIR)/tmp-server/codepod-server/bin && \
+		ln -sf ../server.js $(RELEASE_DIR)/tmp-server/codepod-server/bin/codepod-server && \
+		chmod +x $(RELEASE_DIR)/tmp-server/codepod-server/server.js && \
+		cd $(RELEASE_DIR)/tmp-server && tar -czf $(RELEASE_DIR)/codepod-server-$(VERSION)-linux-amd64.tar.gz codepod-server && \
 		rm -rf $(RELEASE_DIR)/tmp-server; \
 	fi
 	@# Package Agent
